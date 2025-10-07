@@ -92,6 +92,9 @@ extension LibraryInfoView {
 			NavigationLink(.localized("Dylibs")) {
 				SigningDylibView(app: app, options: .constant(nil))
 			}
+			NavigationLink(.localized("Extract Dylibs")) {
+				ExtractDylibView(app: app)
+			}
 		}
 	}
 	
