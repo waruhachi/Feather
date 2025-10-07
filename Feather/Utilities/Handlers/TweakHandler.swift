@@ -307,6 +307,7 @@ extension TweakHandler {
 	// MARK: - Extract Dylibs
 	public func extractDylibs(from app: URL) async throws -> [URL] {
 		var extractedDylibs: [URL] = []
+		var processedNames: Set<String> = []
 		let tempDir = _fileManager.temporaryDirectory.appendingPathComponent("FeatherExtractedDylibs_\(UUID().uuidString)")
 		try _fileManager.createDirectoryIfNeeded(at: tempDir)
 		
@@ -315,7 +316,11 @@ extension TweakHandler {
 		if _fileManager.fileExists(atPath: frameworksDir.path) {
 			let dylibsInFrameworks = try await _locateDylibFiles(in: frameworksDir)
 			for dylibURL in dylibsInFrameworks {
-				let destURL = tempDir.appendingPathComponent(dylibURL.lastPathComponent)
+				let fileName = dylibURL.lastPathComponent
+				guard !processedNames.contains(fileName) else { continue }
+				processedNames.insert(fileName)
+				
+				let destURL = tempDir.appendingPathComponent(fileName)
 				try _fileManager.copyItem(at: dylibURL, to: destURL)
 				extractedDylibs.append(destURL)
 			}
@@ -324,7 +329,11 @@ extension TweakHandler {
 		// Check root directory
 		let rootDylibs = try await _locateDylibFiles(in: app)
 		for dylibURL in rootDylibs {
-			let destURL = tempDir.appendingPathComponent(dylibURL.lastPathComponent)
+			let fileName = dylibURL.lastPathComponent
+			guard !processedNames.contains(fileName) else { continue }
+			processedNames.insert(fileName)
+			
+			let destURL = tempDir.appendingPathComponent(fileName)
 			try _fileManager.copyItem(at: dylibURL, to: destURL)
 			extractedDylibs.append(destURL)
 		}
