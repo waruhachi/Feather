@@ -28,13 +28,13 @@ struct ExtractDylibView: View {
 					}
 				}
 			} else if let errorMessage = _errorMessage {
-				NBSection {
+				NBSection("Error") {
 					Text(errorMessage)
 						.font(.footnote)
 						.foregroundColor(.red)
 				}
 			} else if _dylibs.isEmpty {
-				NBSection {
+				NBSection("Status") {
 					Text(.localized("No injected dylibs found."))
 						.font(.footnote)
 						.foregroundColor(.disabled())
