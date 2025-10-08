@@ -1,0 +1,32 @@
+name: PR Build Test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: 'true'
+      
+      - name: Use Xcode 16.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+
+      - name: Compile Feather
+        run: | 
+          agvtool new-version -all $(git rev-parse HEAD)
+          make
+          mkdir upload
+          mv packages/* upload/
+
+      - name: Upload IPA Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: feather-ipa
+          path: upload/*.ipa
+          retention-days: 30
