@@ -97,7 +97,7 @@ class TweakHandler {
 		}
 
 		// inject into all extensions if enabled
-		if !_injectedDylibNames.isEmpty {
+		if _options.injectIntoExtensions && !_injectedDylibNames.isEmpty {
 			_injectIntoAllExtensions(dylibNames: _injectedDylibNames)
 		}
 	}
@@ -290,8 +290,10 @@ class TweakHandler {
 
 	// Injects a dylib into an extension's executable
 	private func _injectIntoExtension(extensionURL: URL, dylibName: String) {
-		guard let extensionBundle = Bundle(url: extensionURL),
-				let extensionExecutable = extensionBundle.executableURL else {
+		guard 
+			let extensionBundle = Bundle(url: extensionURL),
+			let extensionExecutable = extensionBundle.executableURL 
+		else {
 			Logger.misc.warning("Skipping \(extensionURL.lastPathComponent): couldn't read bundle")
 			return
 		}
@@ -326,8 +328,6 @@ class TweakHandler {
 
 	// Injects all dylibs into all discovered extensions
 	private func _injectIntoAllExtensions(dylibNames: [String]) {
-		guard _options.injectIntoExtensions else { return }
-
 		let extensions = _discoverAppExtensions()
 
 		guard !extensions.isEmpty else {
