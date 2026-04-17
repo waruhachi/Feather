@@ -55,12 +55,13 @@ struct SigningExtensionsView: View {
 		}
 		.sheet(isPresented: $_isAddingPresenting) {
 			FileImporterRepresentableView(
-				allowedContentTypes: [.appex],
+				allowedContentTypes: [.appex, .folder],
 				allowsMultipleSelection: true,
 				onDocumentsPicked: { urls in
 					guard !urls.isEmpty else { return }
 
 					for url in urls {
+						guard url.pathExtension.lowercased() == "appex" else { continue }
 						FileManager.default.moveAndStore(
 							url,
 							with: "FeatherAppExtension"

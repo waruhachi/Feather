@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 
 extension UTType {
 	static var dylib: UTType = .init(filenameExtension: "dylib")!
-	static var appex: UTType = .init(filenameExtension: "appex")!
+	static var appex: UTType = .init(filenameExtension: "appex", conformingTo: .bundle)!
 	static var deb: UTType = .init(filenameExtension: "deb")!
 	static var ipa: UTType = .init(filenameExtension: "ipa")!
 	static var tipa: UTType = .init(filenameExtension: "tipa")!
