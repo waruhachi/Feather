@@ -225,6 +225,13 @@ extension SigningView {
 						options: $_temporaryOptions.optional()
 					)
 				}
+				
+				NavigationLink(.localized("Extensions")) {
+					SigningExtensionsView(
+						app: app,
+						options: $_temporaryOptions
+					)
+				}
 				#if NIGHTLY || DEBUG
 					NavigationLink(.localized("Entitlements") + " (BETA)") {
 						SigningEntitlementsView(
@@ -275,10 +282,43 @@ extension SigningView {
 			return
 		}
 
+		if _temporaryOptions.injectedAppExtensions.isEmpty {
+			_beginSigning()
+			return
+		}
+
+		let collisions = _extensionCollisions()
+		guard !collisions.isEmpty else {
+			_beginSigning()
+			return
+		}
+
+		let preview = collisions
+			.prefix(3)
+			.map(\.displayName)
+			.joined(separator: "\n")
+
+		let message = preview.isEmpty
+			? .localized("One or more extensions already exist in this app.")
+			: .localized("The following extensions already exist and would be replaced:") + "\n\n" + preview
+
+		let replace = UIAlertAction(title: .localized("Replace"), style: .destructive) { _ in
+			_beginSigning()
+		}
+		let cancel = UIAlertAction(title: .localized("Cancel Signing"), style: .cancel)
+
+		UIAlertController.showAlert(
+			title: .localized("Extension Conflict"),
+			message: message,
+			actions: [cancel, replace]
+		)
+	}
+
+	private func _beginSigning() {
 		let generator = UIImpactFeedbackGenerator(style: .light)
 		generator.impactOccurred()
 		_isSigning = true
-		
+
 		FR.signPackageFile(
 			app,
 			using: _temporaryOptions,
@@ -289,7 +329,7 @@ extension SigningView {
 				let ok = UIAlertAction(title: .localized("Dismiss"), style: .cancel) { _ in
 					dismiss()
 				}
-				
+
 				UIAlertController.showAlert(
 					title: "Error",
 					message: error.localizedDescription,
@@ -302,7 +342,7 @@ extension SigningView {
 				{
 					Storage.shared.deleteApp(for: app)
 				}
-				
+
 				if _temporaryOptions.post_installAppAfterSigned {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
 						NotificationCenter.default.post(name: Notification.Name("Feather.installApp"), object: nil)
@@ -312,4 +352,74 @@ extension SigningView {
 			}
 		}
 	}
+
+	private func _extensionCollisions() -> [SigningExtensionCollision] {
+		guard
+			let appURL = Storage.shared.getAppDirectory(for: app)
+		else {
+			return []
+		}
+
+		let existing = _discoverExtensions(at: appURL)
+		let queued = _temporaryOptions.injectedAppExtensions.map(SigningExtensionCollisionCandidate.init)
+
+		var collisions: [SigningExtensionCollision] = []
+
+		for queuedItem in queued {
+			if let exactNameMatch = existing.first(where: { $0.folderName == queuedItem.folderName }) {
+				collisions.append(SigningExtensionCollision(displayName: queuedItem.folderName, reason: .folderName, existing: exactNameMatch))
+				continue
+			}
+
+			if
+				let queuedBundleID = queuedItem.bundleIdentifier,
+				let existingBundleIDMatch = existing.first(where: { $0.bundleIdentifier == queuedBundleID })
+			{
+				collisions.append(SigningExtensionCollision(displayName: queuedItem.folderName, reason: .bundleIdentifier, existing: existingBundleIDMatch))
+			}
+		}
+
+		return collisions
+	}
+
+	private func _discoverExtensions(at appURL: URL) -> [SigningExtensionCollisionCandidate] {
+		let directories = ["PlugIns", "Extensions"].map {
+			appURL.appendingPathComponent($0)
+		}
+
+		var results: [SigningExtensionCollisionCandidate] = []
+
+		for directory in directories {
+			guard let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+				continue
+			}
+
+			for url in contents where url.pathExtension == "appex" {
+				results.append(SigningExtensionCollisionCandidate(url: url))
+			}
+		}
+
+		return results
+	}
+}
+
+private struct SigningExtensionCollisionCandidate {
+	let folderName: String
+	let bundleIdentifier: String?
+
+	init(url: URL) {
+		self.folderName = url.lastPathComponent
+		self.bundleIdentifier = (NSDictionary(contentsOf: url.appendingPathComponent("Info.plist"))?["CFBundleIdentifier"] as? String)
+	}
+}
+
+private struct SigningExtensionCollision {
+	enum Reason {
+		case folderName
+		case bundleIdentifier
+	}
+
+	let displayName: String
+	let reason: Reason
+	let existing: SigningExtensionCollisionCandidate
 }

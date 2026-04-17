@@ -64,12 +64,7 @@ final class SigningHandler: NSObject {
 			throw SigningFileHandlerError.infoPlistNotFound
 		}
 		
-		if
-			let identifier = _options.appIdentifier,
-			let oldIdentifier = infoDictionary["CFBundleIdentifier"] as? String
-		{
-			try await _modifyPluginIdentifiers(old: oldIdentifier, new: identifier, for: movedAppPath)
-		}
+		let oldIdentifier = infoDictionary["CFBundleIdentifier"] as? String
 		
 		try await _modifyDict(using: infoDictionary, with: _options, to: movedAppPath)
 		
@@ -87,6 +82,18 @@ final class SigningHandler: NSObject {
 		
 		try await _removePresetFiles(for: movedAppPath)
 		try await _removeWatchIfNeeded(for: movedAppPath)
+
+		if !_options.injectedAppExtensions.isEmpty {
+			try await _injectAppExtensions(for: movedAppPath, with: _options)
+		}
+
+		if
+			let identifier = _options.appIdentifier,
+			let oldIdentifier,
+			oldIdentifier != identifier
+		{
+			try await _modifyPluginIdentifiers(old: oldIdentifier, new: identifier, for: movedAppPath)
+		}
 		
 		if _options.experiment_supportLiquidGlass {
 			try await _locateMachosAndChangeToSDK26(for: movedAppPath)
@@ -290,7 +297,7 @@ extension SigningHandler {
 			
 			// CFBundleIdentifier
 			if let oldValue = infoDict["CFBundleIdentifier"] as? String {
-				let newValue = oldValue.replacingOccurrences(of: oldIdentifier, with: newIdentifier)
+				let newValue = _replaceIfPrefix(oldValue, old: oldIdentifier, new: newIdentifier)
 				if oldValue != newValue {
 					infoDict["CFBundleIdentifier"] = newValue
 					didChange = true
@@ -299,7 +306,7 @@ extension SigningHandler {
 			
 			// WKCompanionAppBundleIdentifier
 			if let oldValue = infoDict["WKCompanionAppBundleIdentifier"] as? String {
-				let newValue = oldValue.replacingOccurrences(of: oldIdentifier, with: newIdentifier)
+				let newValue = _replaceIfPrefix(oldValue, old: oldIdentifier, new: newIdentifier)
 				if oldValue != newValue {
 					infoDict["WKCompanionAppBundleIdentifier"] = newValue
 					didChange = true
@@ -308,12 +315,13 @@ extension SigningHandler {
 			if let extensionDict = (infoDict["NSExtension"] as? NSDictionary)?.mutableCopy() as? NSMutableDictionary {
 				// NSExtension → NSExtensionAttributes → WKAppBundleIdentifier
 				if
-					let attributes = extensionDict["NSExtensionAttributes"] as? NSMutableDictionary,
+					let attributes = (extensionDict["NSExtensionAttributes"] as? NSDictionary)?.mutableCopy() as? NSMutableDictionary,
 					let oldValue = attributes["WKAppBundleIdentifier"] as? String
 				{
-					let newValue = oldValue.replacingOccurrences(of: oldIdentifier, with: newIdentifier)
+					let newValue = _replaceIfPrefix(oldValue, old: oldIdentifier, new: newIdentifier)
 					if oldValue != newValue {
 						attributes["WKAppBundleIdentifier"] = newValue
+						extensionDict["NSExtensionAttributes"] = attributes
 						didChange = true
 					}
 				}
@@ -322,7 +330,7 @@ extension SigningHandler {
 				if
 					let oldValue = extensionDict["NSExtensionFileProviderDocumentGroup"] as? String
 				{
-					let newValue = oldValue.replacingOccurrences(of: oldIdentifier, with: newIdentifier)
+					let newValue = _replaceIfPrefix(oldValue, old: oldIdentifier, new: newIdentifier)
 					if oldValue != newValue {
 						extensionDict["NSExtensionFileProviderDocumentGroup"] = newValue
 						didChange = true
@@ -336,6 +344,87 @@ extension SigningHandler {
 				infoDict.write(to: infoPlistURL, atomically: true)
 			}
 		}
+	}
+
+	private func _injectAppExtensions(for app: URL, with options: Options) async throws {
+		guard !options.injectedAppExtensions.isEmpty else { return }
+
+		let pluginsDirectory = app.appendingPathComponent("PlugIns", isDirectory: true)
+		try _fileManager.createDirectoryIfNeeded(at: pluginsDirectory)
+
+		for extensionURL in options.injectedAppExtensions {
+			guard extensionURL.pathExtension == "appex" else {
+				throw SigningFileHandlerError.invalidInjectedExtension
+			}
+
+			let metadata = _extensionMetadata(for: extensionURL)
+			guard metadata.bundleIdentifier != nil else {
+				throw SigningFileHandlerError.invalidInjectedExtension
+			}
+
+			let destinationURL = pluginsDirectory.appendingPathComponent(extensionURL.lastPathComponent)
+
+			if let collisionURL = _locateExtensionCollision(for: metadata, in: app) {
+				try _fileManager.removeFileIfNeeded(at: collisionURL)
+			}
+
+			try _fileManager.removeFileIfNeeded(at: destinationURL)
+			try _fileManager.copyItem(at: extensionURL, to: destinationURL)
+			try await _removeCodeSigningArtifacts(in: destinationURL)
+		}
+	}
+
+	private func _locateExtensionCollision(for injected: AppExtensionMetadata, in app: URL) -> URL? {
+		let existingBundles = _enumerateFiles(at: app) {
+			$0.hasSuffix(".appex")
+		}
+
+		for existingURL in existingBundles {
+			let existingMetadata = _extensionMetadata(for: existingURL)
+			let isNameMatch = existingMetadata.folderName == injected.folderName
+			let isIdentifierMatch =
+				existingMetadata.bundleIdentifier != nil &&
+				injected.bundleIdentifier != nil &&
+				existingMetadata.bundleIdentifier == injected.bundleIdentifier
+
+			if isNameMatch || isIdentifierMatch {
+				return existingURL
+			}
+		}
+
+		return nil
+	}
+
+	private func _removeCodeSigningArtifacts(in appex: URL) async throws {
+		let embeddedProvisioning = appex.appendingPathComponent("embedded.mobileprovision")
+		let signatureDirectory = appex.appendingPathComponent("_CodeSignature", isDirectory: true)
+
+		try _fileManager.removeFileIfNeeded(at: embeddedProvisioning)
+		try _fileManager.removeFileIfNeeded(at: signatureDirectory)
+
+		let nestedArtifacts = _enumerateFiles(at: appex) {
+			$0.hasSuffix("_CodeSignature") || $0.hasSuffix("embedded.mobileprovision")
+		}
+
+		for artifact in nestedArtifacts {
+			try _fileManager.removeFileIfNeeded(at: artifact)
+		}
+	}
+
+	private func _extensionMetadata(for url: URL) -> AppExtensionMetadata {
+		let infoPlistURL = url.appendingPathComponent("Info.plist")
+		let infoDictionary = NSDictionary(contentsOf: infoPlistURL)
+
+		return AppExtensionMetadata(
+			folderName: url.lastPathComponent,
+			bundleIdentifier: infoDictionary?["CFBundleIdentifier"] as? String
+		)
+	}
+
+	private func _replaceIfPrefix(_ value: String, old: String, new: String) -> String {
+		guard value.hasPrefix(old) else { return value }
+		let suffix = value.dropFirst(old.count)
+		return new + suffix
 	}
 	
 	private func _removePresetFiles(for app: URL) async throws {
@@ -434,12 +523,18 @@ extension SigningHandler {
 	}
 }
 
+private struct AppExtensionMetadata {
+	let folderName: String
+	let bundleIdentifier: String?
+}
+
 enum SigningFileHandlerError: Error, LocalizedError {
 	case appNotFound
 	case infoPlistNotFound
 	case missingCertifcate
 	case disinjectFailed
 	case signFailed
+	case invalidInjectedExtension
 	
 	var errorDescription: String? {
 		switch self {
@@ -448,6 +543,7 @@ enum SigningFileHandlerError: Error, LocalizedError {
 		case .missingCertifcate: "No certificate was specified."
 		case .disinjectFailed: "Removing mach-O load paths failed."
 		case .signFailed: "Signing failed."
+		case .invalidInjectedExtension: "One or more injected extensions are invalid."
 		}
 	}
 }

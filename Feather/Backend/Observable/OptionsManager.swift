@@ -80,6 +80,8 @@ struct Options: Codable, Equatable {
 	var displayNames: [String: String]
 	/// Array of files (`.dylib`, `.deb` ) to extract and inject
 	var injectionFiles: [URL]
+	/// Array of `.appex` bundles to inject into `PlugIns/`
+	var injectedAppExtensions: [URL]
 	/// Mach-o load paths to remove (i.e. `@executable_path/demo1.dylib`)
 	var disInjectionFiles: [String]
 	/// App files to remove from (i.e. `Frameworks/CydiaSubstrate.framework`)
@@ -135,6 +137,7 @@ struct Options: Codable, Equatable {
 		identifiers: [:],
 		displayNames: [:],
 		injectionFiles: [],
+		injectedAppExtensions: [],
 		disInjectionFiles: [],
 		removeFiles: [],
 		fileSharing: false,
