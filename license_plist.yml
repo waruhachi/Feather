@@ -22,7 +22,9 @@ manual:
     file: "LICENSE_EllEKIT"
 
   - name: "LiveContainer"
-    file: "Zsign/LICENSE_LC"
+    source: https://github.com/LiveContainer/LiveContainer
+    body: |-
+      Apache License 2.0
 
 exclude:
   - swift-html-entities

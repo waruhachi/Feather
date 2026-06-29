@@ -2,7 +2,7 @@
 //  SigningExtensionsView.swift
 //  Feather
 //
-//  Created by GitHub Copilot on 17.04.2026.
+//  Created by waruhachi on 28.06.2026.
 //
 
 import NimbleViews
@@ -55,13 +55,15 @@ struct SigningExtensionsView: View {
 		}
 		.sheet(isPresented: $_isAddingPresenting) {
 			FileImporterRepresentableView(
-				allowedContentTypes: [.appex, .folder],
+				allowedContentTypes: [.appex],
 				allowsMultipleSelection: true,
 				onDocumentsPicked: { urls in
 					guard !urls.isEmpty else { return }
 
 					for url in urls {
-						guard url.pathExtension.lowercased() == "appex" else { continue }
+						guard url.pathExtension.lowercased() == "appex" else {
+							continue
+						}
 						FileManager.default.moveAndStore(
 							url,
 							with: "FeatherAppExtension"

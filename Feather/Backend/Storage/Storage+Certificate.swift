@@ -7,7 +7,7 @@
 
 import CoreData
 import UIKit.UIImpactFeedbackGenerator
-import ZsignSwift
+import Zsign
 
 // MARK: - Class extension: certificate
 extension Storage {
@@ -21,7 +21,7 @@ extension Storage {
 		completion: @escaping (Error?) -> Void
 	) {
 		let generator = UIImpactFeedbackGenerator(style: .light)
-		
+
 		let new = CertificatePair(context: context)
 		new.uuid = uuid
 		new.date = Date()
@@ -35,7 +35,7 @@ extension Storage {
 		generator.impactOccurred()
 		completion(nil)
 	}
-	
+
 	func deleteCertificate(for cert: CertificatePair) {
 		if let url = getUuidDirectory(for: cert) {
 			try? FileManager.default.removeItem(at: url)
@@ -43,10 +43,13 @@ extension Storage {
 		context.delete(cert)
 		saveContext()
 	}
-	
+
 	func getCertificate(for index: Int) -> CertificatePair? {
-		let fetchRequest: NSFetchRequest<CertificatePair> = CertificatePair.fetchRequest()
-		fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \CertificatePair.date, ascending: false)]
+		let fetchRequest: NSFetchRequest<CertificatePair> =
+			CertificatePair.fetchRequest()
+		fetchRequest.sortDescriptors = [
+			NSSortDescriptor(keyPath: \CertificatePair.date, ascending: false)
+		]
 
 		guard
 			let results = try? context.fetch(fetchRequest),
@@ -54,16 +57,18 @@ extension Storage {
 		else {
 			return nil
 		}
-		
+
 		return results[index]
 	}
-	
+
 	func revokagedCertificate(for cert: CertificatePair) {
 		guard !cert.revoked else { return }
-		
+
 		Zsign.checkRevokage(
-			provisionPath: Storage.shared.getFile(.provision, from: cert)?.path ?? "",
-			p12Path: Storage.shared.getFile(.certificate, from: cert)?.path ?? "",
+			provisionPath: Storage.shared.getFile(.provision, from: cert)?.path
+				?? "",
+			p12Path: Storage.shared.getFile(.certificate, from: cert)?.path
+				?? "",
 			p12Password: cert.password ?? ""
 		) { (status, _, _) in
 			if status == 1 {
@@ -74,40 +79,43 @@ extension Storage {
 			}
 		}
 	}
-	
+
 	enum FileRequest: String {
 		case certificate = "p12"
 		case provision = "mobileprovision"
 	}
-	
+
 	func getFile(_ type: FileRequest, from cert: CertificatePair) -> URL? {
 		guard let url = getUuidDirectory(for: cert) else {
 			return nil
 		}
-		
+
 		return FileManager.default.getPath(in: url, for: type.rawValue)
 	}
-	
+
 	func getProvisionFileDecoded(for cert: CertificatePair) -> Certificate? {
 		guard let url = getFile(.provision, from: cert) else {
 			return nil
 		}
-		
+
 		let read = CertificateReader(url)
 		return read.decoded
 	}
-	
+
 	func getUuidDirectory(for cert: CertificatePair) -> URL? {
 		guard let uuid = cert.uuid else {
 			return nil
 		}
-		
+
 		return FileManager.default.certificates(uuid)
 	}
-	
+
 	func getAllCertificates() -> [CertificatePair] {
-		let fetchRequest: NSFetchRequest<CertificatePair> = CertificatePair.fetchRequest()
-		fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \CertificatePair.date, ascending: false)]
+		let fetchRequest: NSFetchRequest<CertificatePair> =
+			CertificatePair.fetchRequest()
+		fetchRequest.sortDescriptors = [
+			NSSortDescriptor(keyPath: \CertificatePair.date, ascending: false)
+		]
 		return (try? context.fetch(fetchRequest)) ?? []
 	}
 }

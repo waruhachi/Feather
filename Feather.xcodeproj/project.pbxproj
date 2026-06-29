@@ -12,7 +12,8 @@
 		330F68FE2DBF7C8600D8C35D /* NimbleViews in Frameworks */ = {isa = PBXBuildFile; productRef = 330F68FD2DBF7C8600D8C35D /* NimbleViews */; };
 		330F69012DC03DF500D8C35D /* NimbleExtensions in Frameworks */ = {isa = PBXBuildFile; productRef = 330F69002DC03DF500D8C35D /* NimbleExtensions */; };
 		330F69032DC03DF500D8C35D /* NimbleViews in Frameworks */ = {isa = PBXBuildFile; productRef = 330F69022DC03DF500D8C35D /* NimbleViews */; };
-		3346F5C22DC329A200C7D508 /* ZsignSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 3346F5C12DC329A200C7D508 /* ZsignSwift */; };
+		3346F5C22DC329A200C7D508 /* Zsign in Frameworks */ = {isa = PBXBuildFile; productRef = 3346F5C12DC329A200C7D508 /* Zsign */; };
+		3346F5C42DC329A200C7D508 /* zsignc in Frameworks */ = {isa = PBXBuildFile; productRef = 3346F5C32DC329A200C7D508 /* zsignc */; };
 		3346F83B2DC6C6D100C7D508 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3346F83A2DC6C6D100C7D508 /* NukeUI */; };
 		3346F8492DC6D64800C7D508 /* NimbleJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 3346F8482DC6D64800C7D508 /* NimbleJSON */; };
 		3349E7672DEFB46F00E317ED /* IDeviceSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 3349E7662DEFB46F00E317ED /* IDeviceSwift */; };
@@ -69,7 +70,8 @@
 			files = (
 				330F68FE2DBF7C8600D8C35D /* NimbleViews in Frameworks */,
 				330F68FC2DBF7C8600D8C35D /* NimbleExtensions in Frameworks */,
-				3346F5C22DC329A200C7D508 /* ZsignSwift in Frameworks */,
+				3346F5C22DC329A200C7D508 /* Zsign in Frameworks */,
+				3346F5C42DC329A200C7D508 /* zsignc in Frameworks */,
 				3346F8492DC6D64800C7D508 /* NimbleJSON in Frameworks */,
 				330F69012DC03DF500D8C35D /* NimbleExtensions in Frameworks */,
 				3349E7672DEFB46F00E317ED /* IDeviceSwift in Frameworks */,
@@ -141,7 +143,8 @@
 				330F68FD2DBF7C8600D8C35D /* NimbleViews */,
 				330F69002DC03DF500D8C35D /* NimbleExtensions */,
 				330F69022DC03DF500D8C35D /* NimbleViews */,
-				3346F5C12DC329A200C7D508 /* ZsignSwift */,
+				3346F5C12DC329A200C7D508 /* Zsign */,
+				3346F5C32DC329A200C7D508 /* zsignc */,
 				3346F83A2DC6C6D100C7D508 /* NukeUI */,
 				3346F8482DC6D64800C7D508 /* NimbleJSON */,
 				33693A072DC8BF5B00730215 /* AltSourceKit */,
@@ -608,9 +611,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = NimbleViews;
 		};
-		3346F5C12DC329A200C7D508 /* ZsignSwift */ = {
+		3346F5C12DC329A200C7D508 /* Zsign */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = ZsignSwift;
+			productName = Zsign;
+		};
+		3346F5C32DC329A200C7D508 /* zsignc */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = zsignc;
 		};
 		3346F83A2DC6C6D100C7D508 /* NukeUI */ = {
 			isa = XCSwiftPackageProductDependency;

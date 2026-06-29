@@ -133,6 +133,79 @@
 	<true/>
 	<key>UILaunchScreen</key>
 	<false/>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.unix-executable</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Dynamic Library</string>
+			<key>UTTypeIdentifier</key>
+			<string>thewonderofyou.Feather.dylib</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>dylib</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Debian Binary Package</string>
+			<key>UTTypeIdentifier</key>
+			<string>thewonderofyou.Feather.deb</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>deb</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>App Extension Bundle</string>
+			<key>UTTypeIdentifier</key>
+			<string>thewonderofyou.Feather.appex</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>appex</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Framework Bundle</string>
+			<key>UTTypeIdentifier</key>
+			<string>thewonderofyou.Feather.framework</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>framework</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

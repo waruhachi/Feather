@@ -5,15 +5,15 @@
 //  Created by samara on 20.04.2025.
 //
 
-import SwiftUI
 import NimbleViews
+import SwiftUI
 
 // MARK: - View
 struct SigningTweaksView: View {
 	@State private var _isAddingPresenting = false
-	
+
 	@Binding var options: Options
-	
+
 	// MARK: Body
 	var body: some View {
 		NBList(.localized("Tweaks")) {
@@ -30,15 +30,19 @@ struct SigningTweaksView: View {
 					selection: $options.injectFolder,
 					values: Options.InjectFolder.allCases
 				)
-				
+
 				Toggle(isOn: $options.injectIntoExtensions) {
-					Label(.localized("Inject into Extensions"), systemImage: "syringe")
+					Label(
+						.localized("Inject into Extensions"),
+						systemImage: "syringe"
+					)
 				}
 			}
-			
+
 			NBSection(.localized("Tweaks")) {
 				if !options.injectionFiles.isEmpty {
-					ForEach(options.injectionFiles, id: \.absoluteString) { tweak in
+					ForEach(options.injectionFiles, id: \.absoluteString) {
+						tweak in
 						_file(tweak: tweak)
 					}
 				} else {
@@ -59,13 +63,20 @@ struct SigningTweaksView: View {
 		}
 		.sheet(isPresented: $_isAddingPresenting) {
 			FileImporterRepresentableView(
-				allowedContentTypes: [.dylib, .deb],
+				allowedContentTypes: [.dylib, .deb, .framework],
 				allowsMultipleSelection: true,
 				onDocumentsPicked: { urls in
 					guard !urls.isEmpty else { return }
-					
+
 					for url in urls {
-						FileManager.default.moveAndStore(url, with: "FeatherTweak") { url in
+						let ext = url.pathExtension.lowercased()
+						guard ["dylib", "deb", "framework"].contains(ext) else {
+							continue
+						}
+						FileManager.default.moveAndStore(
+							url,
+							with: "FeatherTweak"
+						) { url in
 							options.injectionFiles.append(url)
 						}
 					}
@@ -81,27 +92,43 @@ struct SigningTweaksView: View {
 extension SigningTweaksView {
 	@ViewBuilder
 	private func _file(tweak: URL) -> some View {
-		Label(tweak.lastPathComponent, systemImage: "folder.fill")
-			.lineLimit(2)
-			.frame(maxWidth: .infinity, alignment: .leading)
-			.swipeActions(edge: .trailing, allowsFullSwipe: true) {
-				_fileActions(tweak: tweak)
-			}
-			.contextMenu {
-				_fileActions(tweak: tweak)
-			}
+		Label(
+			tweak.lastPathComponent,
+			systemImage: _fileSystemImage(for: tweak)
+		)
+		.lineLimit(2)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.swipeActions(edge: .trailing, allowsFullSwipe: true) {
+			_fileActions(tweak: tweak)
+		}
+		.contextMenu {
+			_fileActions(tweak: tweak)
+		}
 	}
-	
+
 	@ViewBuilder
 	private func _fileActions(tweak: URL) -> some View {
 		Button(role: .destructive) {
 			FileManager.default.deleteStored(tweak) { url in
-				if let index = options.injectionFiles.firstIndex(where: { $0 == url }) {
+				if let index = options.injectionFiles.firstIndex(where: {
+					$0 == url
+				}) {
 					options.injectionFiles.remove(at: index)
 				}
 			}
 		} label: {
 			Label(.localized("Delete"), systemImage: "trash")
+		}
+	}
+
+	private func _fileSystemImage(for url: URL) -> String {
+		switch url.pathExtension.lowercased() {
+		case "framework":
+			"shippingbox"
+		case "deb":
+			"archivebox"
+		default:
+			"doc.badge.gearshape"
 		}
 	}
 }

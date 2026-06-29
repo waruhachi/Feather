@@ -11,22 +11,85 @@ import UIKit
 // MARK: - OptionsManager
 class OptionsManager: ObservableObject {
 	static let shared = OptionsManager()
-	
+
 	@Published var options: Options
 	private let _key = "signing_options"
-	
+
 	init() {
-		if
-			let data = UserDefaults.standard.data(forKey: _key),
-			let savedOptions = try? JSONDecoder().decode(Options.self, from: data)
-		{
-			self.options = savedOptions
+		if let data = UserDefaults.standard.data(forKey: _key) {
+			if let decodedOptions = Self._decodeOptions(from: data) {
+				let migratedOptions = Self._migrateFrameworksIntoTweaks(
+					in: decodedOptions
+				)
+				self.options = migratedOptions
+
+				if migratedOptions != decodedOptions {
+					self.saveOptions()
+				}
+			} else {
+				self.options = Options.defaultOptions
+				self.saveOptions()
+			}
 		} else {
 			self.options = Options.defaultOptions
 			self.saveOptions()
 		}
 	}
-	
+
+	private static func _decodeOptions(from data: Data) -> Options? {
+		if let options = try? JSONDecoder().decode(Options.self, from: data) {
+			return options
+		}
+
+		guard
+			var raw = (try? JSONSerialization.jsonObject(with: data))
+				as? [String: Any]
+		else {
+			return nil
+		}
+
+		if raw["injectionFrameworks"] == nil {
+			raw["injectionFrameworks"] = []
+		}
+
+		if raw["injectedAppExtensions"] == nil {
+			raw["injectedAppExtensions"] = []
+		}
+
+		guard
+			let patchedData = try? JSONSerialization.data(withJSONObject: raw),
+			let patchedOptions = try? JSONDecoder().decode(
+				Options.self,
+				from: patchedData
+			)
+		else {
+			return nil
+		}
+
+		return patchedOptions
+	}
+
+	private static func _migrateFrameworksIntoTweaks(in options: Options)
+		-> Options
+	{
+		var migratedOptions = options
+
+		let frameworkURLs = migratedOptions.injectionFrameworks
+
+		guard !frameworkURLs.isEmpty else {
+			return migratedOptions
+		}
+
+		let existing = Set(migratedOptions.injectionFiles.map(\.absoluteString))
+		let missing = frameworkURLs.filter {
+			!existing.contains($0.absoluteString)
+		}
+		migratedOptions.injectionFiles += missing
+		migratedOptions.injectionFrameworks.removeAll()
+
+		return migratedOptions
+	}
+
 	/// Saves options
 	func saveOptions() {
 		if let encoded = try? JSONEncoder().encode(options) {
@@ -34,7 +97,7 @@ class OptionsManager: ObservableObject {
 			objectWillChange.send()
 		}
 	}
-	
+
 	/// Resets options to default
 	func resetToDefaults() {
 		options = Options.defaultOptions
@@ -44,9 +107,9 @@ class OptionsManager: ObservableObject {
 
 // MARK: - Options
 struct Options: Codable, Equatable {
-	
+
 	// MARK: Pre Modifications
-	
+
 	/// App name
 	var appName: String?
 	/// App version
@@ -61,9 +124,9 @@ struct Options: Codable, Equatable {
 	var minimumAppRequirement: MinimumAppRequirement
 	/// Signing options
 	var signingOption: SigningOption
-	
+
 	// MARK: Options
-	
+
 	/// Inject path (i.e. `@rpath`)
 	var injectPath: InjectPath
 	/// Inject folder (i.e. `Frameworks/`)
@@ -78,8 +141,10 @@ struct Options: Codable, Equatable {
 	var identifiers: [String: String]
 	/// App name list which matches and replaces
 	var displayNames: [String: String]
-	/// Array of files (`.dylib`, `.deb` ) to extract and inject
+	/// Array of files (`.dylib`, `.deb`, `.framework`) to extract and inject
 	var injectionFiles: [URL]
+	/// Legacy framework queue, migrated into `injectionFiles`
+	var injectionFrameworks: [URL]
 	/// Array of `.appex` bundles to inject into `PlugIns/`
 	var injectedAppExtensions: [URL]
 	/// Mach-o load paths to remove (i.e. `@executable_path/demo1.dylib`)
@@ -106,29 +171,29 @@ struct Options: Codable, Equatable {
 	var injectIntoExtensions: Bool
 
 	// MARK: Experiments
-	
+
 	/// Modifies app to support liquid glass
 	var experiment_supportLiquidGlass: Bool
 	/// Modifies application to use ElleKit instead of CydiaSubstrate
 	var experiment_replaceSubstrateWithEllekit: Bool
-	
+
 	// MARK: Post Modifications
-	
+
 	var post_installAppAfterSigned: Bool
 	/// This will delete your imported application after signing, to save on using unneeded space.
 	var post_deleteAppAfterSigned: Bool
-	
+
 	// MARK: - Defaults
 	static let defaultOptions = Options(
-		
+
 		// MARK: Pre Modifications
-		
+
 		appAppearance: .default,
 		minimumAppRequirement: .default,
 		signingOption: .default,
-		
+
 		// MARK: Options
-		
+
 		injectPath: .executable_path,
 		injectFolder: .frameworks,
 		ppqString: randomString(),
@@ -137,6 +202,7 @@ struct Options: Codable, Equatable {
 		identifiers: [:],
 		displayNames: [:],
 		injectionFiles: [],
+		injectionFrameworks: [],
 		injectedAppExtensions: [],
 		disInjectionFiles: [],
 		removeFiles: [],
@@ -149,18 +215,18 @@ struct Options: Codable, Equatable {
 		removeProvisioning: false,
 		changeLanguageFilesForCustomDisplayName: false,
 		injectIntoExtensions: false,
-		
+
 		// MARK: Experiments
-		
+
 		experiment_supportLiquidGlass: false,
 		experiment_replaceSubstrateWithEllekit: false,
-		
+
 		// MARK: Post Modifications
-		
+
 		post_installAppAfterSigned: false,
 		post_deleteAppAfterSigned: false
 	)
-	
+
 	// MARK: duplicate values are not recommended!
 
 	enum AppAppearance: String, Codable, CaseIterable, LocalizedDescribable {
@@ -177,7 +243,9 @@ struct Options: Codable, Equatable {
 		}
 	}
 
-	enum MinimumAppRequirement: String, Codable, CaseIterable, LocalizedDescribable {
+	enum MinimumAppRequirement: String, Codable, CaseIterable,
+		LocalizedDescribable
+	{
 		case `default`
 		case v16 = "16.0"
 		case v15 = "15.0"
@@ -196,31 +264,31 @@ struct Options: Codable, Equatable {
 			}
 		}
 	}
-	
+
 	enum SigningOption: String, Codable, CaseIterable, LocalizedDescribable {
 		case `default`
 		case onlyModify
-//		case adhoc
+		//		case adhoc
 
 		var localizedDescription: String {
 			switch self {
 			case .default: .localized("Default")
 			case .onlyModify: .localized("Modify")
-//			case .adhoc: .localized("Ad-hoc")
+			//			case .adhoc: .localized("Ad-hoc")
 			}
 		}
 	}
-	
+
 	enum InjectPath: String, Codable, CaseIterable, LocalizedDescribable {
 		case executable_path = "@executable_path"
 		case rpath = "@rpath"
 	}
-	
+
 	enum InjectFolder: String, Codable, CaseIterable, LocalizedDescribable {
 		case root = "/"
 		case frameworks = "/Frameworks/"
 	}
-	
+
 	/// Default random value for `ppqString`
 	static func randomString() -> String {
 		String((0..<6).compactMap { _ in UUID().uuidString.randomElement() })
@@ -233,7 +301,8 @@ protocol LocalizedDescribable {
 	var localizedDescription: String { get }
 }
 
-extension LocalizedDescribable where Self: RawRepresentable, RawValue == String {
+extension LocalizedDescribable
+where Self: RawRepresentable, RawValue == String {
 	var localizedDescription: String {
 		let localized = NSLocalizedString(self.rawValue, comment: "")
 		return localized == self.rawValue ? self.rawValue : localized
