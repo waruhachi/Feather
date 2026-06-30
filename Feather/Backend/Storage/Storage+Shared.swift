@@ -6,6 +6,13 @@
 //
 
 import CoreData
+import Foundation
+
+extension Notification.Name {
+	static let featherImportedAppDidFinish = Notification.Name(
+		"Feather.importedAppDidFinish"
+	)
+}
 
 // MARK: - Class extension: Apps (Shared)
 extension Storage {
@@ -15,12 +22,12 @@ extension Storage {
 			? FileManager.default.signed(uuid)
 			: FileManager.default.unsigned(uuid)
 	}
-	
+
 	func getAppDirectory(for app: AppInfoPresentable) -> URL? {
 		guard let url = getUuidDirectory(for: app) else { return nil }
 		return FileManager.default.getPath(in: url, for: "app")
 	}
-	
+
 	func deleteApp(for app: AppInfoPresentable) {
 		do {
 			if let url = getUuidDirectory(for: app) {
@@ -33,7 +40,7 @@ extension Storage {
 			saveContext()
 		}
 	}
-	
+
 	func getCertificate(from app: AppInfoPresentable) -> CertificatePair? {
 		if let signed = app as? Signed {
 			return signed.certificate
@@ -46,7 +53,7 @@ extension Storage {
 struct AnyApp: Identifiable {
 	let base: AppInfoPresentable
 	var archive: Bool = false
-	
+
 	var id: String {
 		base.uuid ?? UUID().uuidString
 	}
@@ -61,7 +68,7 @@ protocol AppInfoPresentable {
 	var uuid: String? { get }
 	var source: URL? { get }
 	var isSigned: Bool { get }
-	
+
 }
 
 extension Signed: AppInfoPresentable {

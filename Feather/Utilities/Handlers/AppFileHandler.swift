@@ -6,8 +6,8 @@
 //
 
 import Foundation
-import Zip
 import SwiftUI
+import Zip
 
 final class AppFileHandler: NSObject, @unchecked Sendable {
 	private let _fileManager = FileManager.default
@@ -19,34 +19,42 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 	private let _install: Bool
 	private let _download: Download?
 	private let _sourceProvenance: SourceAppProvenance?
-	
+	private let _importOrigin: IPAImportOrigin
+
 	init(
 		file ipa: URL,
 		install: Bool = false,
 		download: Download? = nil,
-		sourceProvenance: SourceAppProvenance? = nil
+		sourceProvenance: SourceAppProvenance? = nil,
+		importOrigin: IPAImportOrigin? = nil
 	) {
 		self._ipa = ipa
 		self._install = install
 		self._download = download
 		self._sourceProvenance = sourceProvenance ?? download?.sourceProvenance
+		self._importOrigin =
+			sourceProvenance.map {
+				.featherSource($0.sourceRepositoryURL)
+			} ?? importOrigin ?? download?.importOrigin ?? .localFile
 		self._uniqueWorkDir = _fileManager.temporaryDirectory
 			.appendingPathComponent("FeatherImport_\(_uuid)", isDirectory: true)
-		
+
 		super.init()
 	}
-	
+
 	func copy() async throws {
 		try _fileManager.createDirectoryIfNeeded(at: _uniqueWorkDir)
-		
-		let destinationURL = _uniqueWorkDir.appendingPathComponent(_ipa.lastPathComponent)
+
+		let destinationURL = _uniqueWorkDir.appendingPathComponent(
+			_ipa.lastPathComponent
+		)
 
 		try _fileManager.removeFileIfNeeded(at: destinationURL)
-		
+
 		try _fileManager.copyItem(at: _ipa, to: destinationURL)
 		_ipa = destinationURL
 	}
-	
+
 	func extract() async throws {
 		if _ipa.pathExtension == "ipa" {
 			Zip.addCustomFileExtension("ipa")
@@ -54,9 +62,9 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 		if _ipa.pathExtension == "tipa" {
 			Zip.addCustomFileExtension("tipa")
 		}
-		
+
 		let download = self._download
-		
+
 		try await withCheckedThrowingContinuation { continuation in
 			DispatchQueue.global(qos: .utility).async {
 				do {
@@ -69,18 +77,24 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 							if let download = download {
 								DispatchQueue.main.async {
 									download.unpackageProgress = progress
-									
+
 									#if !targetEnvironment(macCatalyst)
-									if #available(iOS 26.0, *) {
-										BackgroundTaskManager.shared.updateProgress(for: download.id, progress: download.overallProgress)
-									}
+										if #available(iOS 26.0, *) {
+											BackgroundTaskManager.shared
+												.updateProgress(
+													for: download.id,
+													progress: download
+														.overallProgress
+												)
+										}
 									#endif
 								}
 							}
 						}
 					)
-					
-					self.uniqueWorkDirPayload = self._uniqueWorkDir.appendingPathComponent("Payload")
+
+					self.uniqueWorkDirPayload = self._uniqueWorkDir
+						.appendingPathComponent("Payload")
 					continuation.resume()
 				} catch {
 					continuation.resume(throwing: error)
@@ -88,32 +102,32 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 			}
 		}
 	}
-	
+
 	func move() async throws {
 		guard let payloadURL = uniqueWorkDirPayload else {
 			throw ImportedFileHandlerError.payloadNotFound
 		}
-		
+
 		let destinationURL = try await _directory()
-		
+
 		guard _fileManager.fileExists(atPath: payloadURL.path) else {
 			throw ImportedFileHandlerError.payloadNotFound
 		}
-		
+
 		try _fileManager.moveItem(at: payloadURL, to: destinationURL)
-		
+
 		try? _fileManager.removeItem(at: _uniqueWorkDir)
 	}
-	
+
 	func addToDatabase() async throws {
 		let app = try await _directory()
-		
+
 		guard let appUrl = _fileManager.getPath(in: app, for: "app") else {
 			return
 		}
-		
+
 		let bundle = Bundle(url: appUrl)
-		
+
 		Storage.shared.addImported(
 			uuid: _uuid,
 			source: _sourceProvenance?.sourceRepositoryURL,
@@ -122,21 +136,35 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 			appVersion: bundle?.version,
 			appIcon: bundle?.iconFileName
 		) { _ in }
-		
+
 		if let sourceProvenance = _sourceProvenance {
 			Storage.shared.addSourceMetadata(
 				for: _uuid,
 				kind: .imported,
 				provenance: sourceProvenance
 			)
+		} else {
+			Storage.shared.addImportMetadata(
+				for: _uuid,
+				kind: .imported,
+				origin: _importOrigin,
+				appIdentifier: bundle?.bundleIdentifier,
+				appName: bundle?.name,
+				appVersion: bundle?.version
+			)
 		}
+
+		NotificationCenter.default.post(
+			name: .featherImportedAppDidFinish,
+			object: _uuid
+		)
 	}
-	
+
 	private func _directory() async throws -> URL {
 		// Documents/Feather/Unsigned/\(UUID)
 		_fileManager.unsigned(_uuid)
 	}
-	
+
 	func clean() async throws {
 		try _fileManager.removeFileIfNeeded(at: _uniqueWorkDir)
 	}

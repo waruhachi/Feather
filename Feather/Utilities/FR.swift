@@ -18,13 +18,15 @@ enum FR {
 		_ ipa: URL,
 		download: Download? = nil,
 		sourceProvenance: SourceAppProvenance? = nil,
+		importOrigin: IPAImportOrigin? = nil,
 		completion: @escaping (Error?) -> Void
 	) {
 		Task.detached {
 			let handler = AppFileHandler(
 				file: ipa,
 				download: download,
-				sourceProvenance: sourceProvenance
+				sourceProvenance: sourceProvenance,
+				importOrigin: importOrigin
 			)
 
 			do {

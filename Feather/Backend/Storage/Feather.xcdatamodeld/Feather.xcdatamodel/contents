@@ -11,16 +11,25 @@
         <attribute name="appKind" attributeType="String"/>
         <attribute name="appUUID" attributeType="String"/>
         <attribute name="createdAt" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="originKind" optional="YES" attributeType="String"/>
+        <attribute name="originURL" optional="YES" attributeType="URI"/>
+        <attribute name="skippedUpdateVersionID" optional="YES" attributeType="String"/>
         <attribute name="sourceAppDownloadURL" optional="YES" attributeType="URI"/>
-        <attribute name="sourceAppIdentifier" attributeType="String"/>
+        <attribute name="sourceAppIdentifier" optional="YES" attributeType="String"/>
         <attribute name="sourceAppName" optional="YES" attributeType="String"/>
         <attribute name="sourceAppVersion" optional="YES" attributeType="String"/>
         <attribute name="sourceAppVersionDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="sourceRepositoryIdentifier" optional="YES" attributeType="String"/>
         <attribute name="sourceRepositoryName" optional="YES" attributeType="String"/>
-        <attribute name="sourceRepositoryURL" attributeType="URI"/>
-        <attribute name="sourceVersionID" attributeType="String"/>
+        <attribute name="sourceRepositoryURL" optional="YES" attributeType="URI"/>
+        <attribute name="sourceVersionID" optional="YES" attributeType="String"/>
         <attribute name="updatedAt" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="updateProviderDownloadURL" optional="YES" attributeType="URI"/>
+        <attribute name="updateProviderIdentifier" optional="YES" attributeType="String"/>
+        <attribute name="updateProviderKind" optional="YES" attributeType="String"/>
+        <attribute name="updateProviderURL" optional="YES" attributeType="URI"/>
+        <attribute name="updateProviderVersionID" optional="YES" attributeType="String"/>
+        <attribute name="updatesDisabled" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
     </entity>
     <entity name="CertificatePair" representedClassName="CertificatePair" syncable="YES" codeGenerationType="class">
         <attribute name="date" attributeType="Date" usesScalarValueType="NO"/>
