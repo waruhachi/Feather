@@ -83,8 +83,11 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 											BackgroundTaskManager.shared
 												.updateProgress(
 													for: download.id,
-													progress: download
-														.overallProgress
+													progress: min(
+														download
+															.overallProgress,
+														0.99
+													)
 												)
 										}
 									#endif

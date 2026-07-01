@@ -22,6 +22,7 @@ struct LibraryView: View {
 	@State private var _alertDownloadString: String = ""  // for _isDownloadingPresenting
 	@State private var _updateCheckRotation = 0.0
 	@State private var _isUpdateCheckCompleteVisible = false
+	@State private var _importUpdateCheckTask: Task<Void, Never>?
 
 	// MARK: Selection State
 	@State private var _selectedAppUUIDs: Set<String> = []
@@ -285,9 +286,7 @@ struct LibraryView: View {
 					for: .featherImportedAppDidFinish
 				)
 			) { _ in
-				Task {
-					await _checkForUpdatesAfterImport()
-				}
+				_scheduleUpdateCheckAfterImport()
 			}
 			.onChange(of: _editMode) { mode in
 				if mode == .inactive {
@@ -296,6 +295,10 @@ struct LibraryView: View {
 			}
 			.onChange(of: updateManager.isChecking) { isChecking in
 				_handleUpdateCheckStateChange(isChecking)
+			}
+			.onDisappear {
+				_importUpdateCheckTask?.cancel()
+				_importUpdateCheckTask = nil
 			}
 		}
 	}
@@ -356,12 +359,29 @@ extension LibraryView {
 	}
 
 	private func _checkForUpdatesAfterImport() async {
-		try? await Task.sleep(nanoseconds: 300_000_000)
-		while updateManager.isChecking {
-			try? await Task.sleep(nanoseconds: 200_000_000)
+		do {
+			try await Task.sleep(nanoseconds: 300_000_000)
+		} catch {
+			return
 		}
 
+		while updateManager.isChecking {
+			do {
+				try await Task.sleep(nanoseconds: 200_000_000)
+			} catch {
+				return
+			}
+		}
+
+		guard !Task.isCancelled else { return }
 		await _checkForUpdates()
+	}
+
+	private func _scheduleUpdateCheckAfterImport() {
+		_importUpdateCheckTask?.cancel()
+		_importUpdateCheckTask = Task {
+			await _checkForUpdatesAfterImport()
+		}
 	}
 
 	private func _handleUpdateCheckStateChange(_ isChecking: Bool) {

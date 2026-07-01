@@ -261,6 +261,7 @@ extension Storage {
 		metadata.updateProviderVersionID = source.updateProviderVersionID
 		metadata.updateProviderDownloadURL = source.updateProviderDownloadURL
 		metadata.updatesDisabled = source.updatesDisabled
+		metadata.skippedUpdateVersionID = source.skippedUpdateVersionID
 		metadata.updatedAt = now
 
 		saveContext()
@@ -297,26 +298,16 @@ extension Storage {
 		}
 	}
 
-	func skipUpdate(for appUUID: String?, versionID: String) {
-		guard
-			let appUUID,
-			let metadata = sourceMetadata(for: appUUID)
-		else {
-			return
-		}
+	func skipUpdate(for app: AppInfoPresentable, versionID: String) {
+		guard let metadata = _updateControlMetadata(for: app) else { return }
 
 		metadata.skippedUpdateVersionID = versionID
 		metadata.updatedAt = Date()
 		saveContext()
 	}
 
-	func setUpdatesDisabled(for appUUID: String?, disabled: Bool) {
-		guard
-			let appUUID,
-			let metadata = sourceMetadata(for: appUUID)
-		else {
-			return
-		}
+	func setUpdatesDisabled(for app: AppInfoPresentable, disabled: Bool) {
+		guard let metadata = _updateControlMetadata(for: app) else { return }
 
 		metadata.updatesDisabled = disabled
 		metadata.updatedAt = Date()
@@ -364,5 +355,45 @@ extension Storage {
 		case .localFile, .unknown:
 			return .none
 		}
+	}
+
+	private func _updateControlMetadata(
+		for app: AppInfoPresentable
+	) -> AppSourceMetadata? {
+		guard let appUUID = app.uuid else { return nil }
+
+		let metadata =
+			sourceMetadata(for: appUUID) ?? AppSourceMetadata(context: context)
+		let now = Date()
+		if metadata.createdAt == nil {
+			metadata.createdAt = now
+		}
+
+		metadata.appUUID = appUUID
+		metadata.appKind =
+			app.isSigned
+			? SourceLinkedAppKind.signed.rawValue
+			: SourceLinkedAppKind.imported.rawValue
+		if metadata.originKind == nil {
+			metadata.originKind = IPAOriginKind.unknown.rawValue
+		}
+		if metadata.sourceAppIdentifier == nil {
+			metadata.sourceAppIdentifier = app.identifier
+		}
+		if metadata.sourceAppName == nil {
+			metadata.sourceAppName = app.name
+		}
+		if metadata.sourceAppVersion == nil {
+			metadata.sourceAppVersion = app.version
+		}
+		if metadata.sourceVersionID == nil {
+			metadata.sourceVersionID = [
+				IPAOriginKind.unknown.rawValue,
+				app.identifier ?? appUUID,
+				app.version ?? "",
+			].joined(separator: "|")
+		}
+
+		return metadata
 	}
 }

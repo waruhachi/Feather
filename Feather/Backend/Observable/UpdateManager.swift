@@ -51,12 +51,12 @@ final class UpdateManager: ObservableObject {
 
 	func skipUpdate(for app: AppInfoPresentable) {
 		guard let update = update(for: app) else { return }
-		Storage.shared.skipUpdate(for: app.uuid, versionID: update.versionID)
+		Storage.shared.skipUpdate(for: app, versionID: update.versionID)
 		updates[update.localUUID] = nil
 	}
 
 	func setUpdatesDisabled(for app: AppInfoPresentable, disabled: Bool) {
-		Storage.shared.setUpdatesDisabled(for: app.uuid, disabled: disabled)
+		Storage.shared.setUpdatesDisabled(for: app, disabled: disabled)
 		if disabled, let uuid = app.uuid {
 			updates[uuid] = nil
 		}
@@ -209,19 +209,11 @@ final class UpdateManager: ObservableObject {
 					metadata: metadata
 				)
 			case .some(.github), .some(.gitlab):
-				if let releaseUpdate = await _findReleaseUpdate(
+				update = await _findReleaseUpdate(
 					localApp: localApp,
 					localUUID: localUUID,
 					metadata: metadata
-				) {
-					update = releaseUpdate
-				} else {
-					update = await _findAppStoreUpdate(
-						localApp: localApp,
-						localUUID: localUUID,
-						metadata: metadata
-					)
-				}
+				)
 			case .some(.none), nil:
 				if let sourceUpdate = await _findFeatherSourceUpdate(
 					repositories: repositories,
@@ -231,12 +223,12 @@ final class UpdateManager: ObservableObject {
 				) {
 					update = sourceUpdate
 				} else if originKind == .remoteURL {
-					if let releaseUpdate = await _findReleaseUpdate(
-						localApp: localApp,
-						localUUID: localUUID,
-						metadata: metadata
-					) {
-						update = releaseUpdate
+					if _isReleaseSource(metadata?.originURL) {
+						update = await _findReleaseUpdate(
+							localApp: localApp,
+							localUUID: localUUID,
+							metadata: metadata
+						)
 					} else {
 						update = await _findAppStoreUpdate(
 							localApp: localApp,
@@ -405,6 +397,11 @@ final class UpdateManager: ObservableObject {
 		case .featherSource, .appStore, .none:
 			return storedProviderKind
 		}
+	}
+
+	private func _isReleaseSource(_ url: URL?) -> Bool {
+		guard let url else { return false }
+		return ReleaseSource(url: url) != nil
 	}
 
 	private func _findAppStoreUpdate(
@@ -743,7 +740,7 @@ final class UpdateManager: ObservableObject {
 			return lhsPrerelease ? .orderedAscending : .orderedDescending
 		}
 
-		return lhs.compare(rhs, options: [.numeric, .caseInsensitive])
+		return .orderedSame
 	}
 
 	private func _numericVersionComponents(_ version: String) -> [Int] {
@@ -782,10 +779,17 @@ private struct ReleaseSource {
 		let pathComponents = url.pathComponents.filter { $0 != "/" }
 
 		if host == "github.com" || host.hasSuffix(".github.com") {
+			let isTaggedDownload =
+				pathComponents.count >= 6
+				&& pathComponents[2] == "releases"
+				&& pathComponents[3] == "download"
+			let isLatestDownload =
+				pathComponents.count >= 6
+				&& pathComponents[2] == "releases"
+				&& pathComponents[3] == "latest"
+				&& pathComponents[4] == "download"
 			guard
-				pathComponents.count >= 6,
-				pathComponents[2] == "releases",
-				pathComponents[3] == "download",
+				isTaggedDownload || isLatestDownload,
 				let apiURL = URL(
 					string:
 						"https://api.github.com/repos/\(pathComponents[0])/\(pathComponents[1])/releases"

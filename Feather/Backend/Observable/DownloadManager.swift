@@ -224,10 +224,18 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
 					#if !targetEnvironment(macCatalyst)
 						if #available(iOS 26.0, *) {
-							BackgroundTaskManager.shared.updateProgress(
-								for: dl.id,
-								progress: 1.0
-							)
+							if err == nil {
+								BackgroundTaskManager.shared
+									.updateProgress(
+										for: dl.id,
+										progress: 1.0
+									)
+							} else {
+								BackgroundTaskManager.shared.stopTask(
+									for: dl.id,
+									success: false
+								)
+							}
 						}
 
 						self._updateBackgroundAudioState()
