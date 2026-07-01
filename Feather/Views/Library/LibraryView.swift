@@ -11,7 +11,7 @@ import SwiftUI
 
 // MARK: - View
 struct LibraryView: View {
-	@StateObject var downloadManager = DownloadManager.shared
+	private let downloadManager = DownloadManager.shared
 	@StateObject var updateManager = UpdateManager.shared
 
 	@State private var _selectedInfoAppPresenting: AnyApp?
@@ -264,7 +264,12 @@ struct LibraryView: View {
 					_alertDownloadString = ""
 				}
 				Button(.localized("OK")) {
-					if let url = URL(string: _alertDownloadString) {
+					let input = _alertDownloadString.trimmingCharacters(
+						in: .whitespacesAndNewlines
+					)
+					_alertDownloadString = ""
+
+					if let url = URL(string: input) {
 						_ = downloadManager.startDownload(
 							from: url,
 							id: "FeatherManualDownload_\(UUID().uuidString)"
