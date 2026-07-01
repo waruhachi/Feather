@@ -17,10 +17,17 @@ enum FR {
 	static func handlePackageFile(
 		_ ipa: URL,
 		download: Download? = nil,
+		sourceProvenance: SourceAppProvenance? = nil,
+		importOrigin: IPAImportOrigin? = nil,
 		completion: @escaping (Error?) -> Void
 	) {
 		Task.detached {
-			let handler = AppFileHandler(file: ipa, download: download)
+			let handler = AppFileHandler(
+				file: ipa,
+				download: download,
+				sourceProvenance: sourceProvenance,
+				importOrigin: importOrigin
+			)
 
 			do {
 				try await handler.copy()

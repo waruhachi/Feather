@@ -5,9 +5,9 @@
 //  Created by samara on 1.05.2025.
 //
 
-import SwiftUI
 import AltSourceKit
 import NimbleViews
+import SwiftUI
 import UIKit
 
 // MARK: - Extension: View (Enil)
@@ -16,12 +16,12 @@ extension SourceAppsView {
 		case `default` = "default"
 		case name
 		case date
-		
+
 		var displayName: String {
 			switch self {
-			case .default:  .localized("Default")
-			case .name: 	.localized("Name")
-			case .date: 	.localized("Date")
+			case .default: .localized("Default")
+			case .name: .localized("Name")
+			case .date: .localized("Date")
 			}
 		}
 	}
@@ -29,12 +29,13 @@ extension SourceAppsView {
 
 // MARK: - View
 struct SourceAppsView: View {
-	@AppStorage("Feather.sortOptionRawValue") private var _sortOptionRawValue: String = SortOption.default.rawValue
+	@AppStorage("Feather.sortOptionRawValue") private var _sortOptionRawValue:
+		String = SortOption.default.rawValue
 	@AppStorage("Feather.sortAscending") private var _sortAscending: Bool = true
-	
+
 	@State private var _sortOption: SortOption = .default
 	@State private var _selectedRoute: SourceAppRoute?
-	
+
 	@State var isLoading = true
 	@State var hasLoadedOnce = false
 	@State private var _searchText = ""
@@ -46,24 +47,21 @@ struct SourceAppsView: View {
 			.localized("%lld Sources", arguments: object.count)
 		}
 	}
-	
+
 	var object: [AltSource]
 	@ObservedObject var viewModel: SourcesViewModel
-	@State private var _sources: [ASRepository]?
-	
+	@State private var _sourceContexts: [SourceRepositoryContext]?
+
 	// MARK: Body
 	var body: some View {
 		ZStack {
-			if
-				let _sources,
-				!_sources.isEmpty
-			{
+			if let _sourceContexts {
 				SourceAppsTableRepresentableView(
-					sources: _sources,
+					sourceContexts: _sourceContexts,
 					searchText: $_searchText,
 					sortOption: $_sortOption,
 					sortAscending: $_sortAscending,
-					onSelect: {self._selectedRoute = $0}
+					onSelect: { self._selectedRoute = $0 }
 				)
 				.ignoresSafeArea()
 			} else {
@@ -73,25 +71,27 @@ struct SourceAppsView: View {
 		.navigationTitle(_navigationTitle)
 		.searchable(text: $_searchText, placement: .platform())
 		.toolbarTitleMenu {
-			if
-				let _sources,
-				_sources.count == 1
+			if let _sourceContexts,
+				_sourceContexts.count == 1
 			{
-				if let url = _sources[0].website {
+				if let url = _sourceContexts[0].repository.website {
 					Button(.localized("Visit Website"), systemImage: "globe") {
 						UIApplication.open(url)
 					}
 				}
-				
-				if let url = _sources[0].patreonURL {
-					Button(.localized("Visit Patreon"), systemImage: "dollarsign.circle") {
+
+				if let url = _sourceContexts[0].repository.patreonURL {
+					Button(
+						.localized("Visit Patreon"),
+						systemImage: "dollarsign.circle"
+					) {
 						UIApplication.open(url)
 					}
 				}
 			}
-			
+
 			Divider()
-			
+
 			Button(.localized("Copy"), systemImage: "doc.on.doc") {
 				guard !object.isEmpty else {
 					UIAlertController.showAlertWithOk(
@@ -132,23 +132,57 @@ struct SourceAppsView: View {
 			_sortOptionRawValue = newValue.rawValue
 		}
 		.navigationDestinationIfAvailable(item: $_selectedRoute) { route in
-			SourceAppsDetailView(source: route.source, app: route.app)
+			SourceAppsDetailView(
+				sourceURL: route.sourceURL,
+				source: route.source,
+				app: route.app
+			)
 		}
 	}
-	
+
 	private func _load() {
 		isLoading = true
-		
+
 		Task {
-			let loadedSources = object.compactMap { viewModel.sources[$0] }
-			_sources = loadedSources
+			let loadedSources = object.compactMap {
+				source -> SourceRepositoryContext? in
+				guard let repository = viewModel.sources[source] else {
+					return nil
+				}
+				return SourceRepositoryContext(
+					sourceURL: source.sourceURL,
+					repository: repository
+				)
+			}
+			_sourceContexts = loadedSources
 			withAnimation(.easeIn(duration: 0.2)) {
 				isLoading = false
 			}
 		}
 	}
-	
+
+	struct SourceRepositoryContext: Equatable {
+		let sourceURL: URL?
+		let repository: ASRepository
+
+		static func == (
+			lhs: SourceRepositoryContext,
+			rhs: SourceRepositoryContext
+		) -> Bool {
+			lhs.sourceURL == rhs.sourceURL
+				&& lhs.repository.id == rhs.repository.id
+				&& lhs.repository.name == rhs.repository.name
+				&& lhs.repository.apps.map {
+					"\($0.currentUniqueId)|\($0.currentVersion ?? "")"
+				}
+					== rhs.repository.apps.map {
+						"\($0.currentUniqueId)|\($0.currentVersion ?? "")"
+					}
+		}
+	}
+
 	struct SourceAppRoute: Identifiable, Hashable {
+		let sourceURL: URL?
 		let source: ASRepository
 		let app: ASRepository.App
 		let id: String = UUID().uuidString
@@ -165,7 +199,7 @@ extension SourceAppsView {
 			}
 		}
 	}
-	
+
 	private func _sortButton(for option: SortOption) -> some View {
 		Button {
 			if _sortOption == option {
@@ -179,18 +213,22 @@ extension SourceAppsView {
 				Text(option.displayName)
 				Spacer()
 				if _sortOption == option {
-					Image(systemName: _sortAscending ? "chevron.up" : "chevron.down")
+					Image(
+						systemName: _sortAscending
+							? "chevron.up" : "chevron.down"
+					)
 				}
 			}
 		}
 	}
 }
 
-import SwiftUI
-
 extension View {
 	@ViewBuilder
-	func navigationDestinationIfAvailable<Item: Identifiable & Hashable, Destination: View>(
+	func navigationDestinationIfAvailable<
+		Item: Identifiable & Hashable,
+		Destination: View
+	>(
 		item: Binding<Item?>,
 		@ViewBuilder destination: @escaping (Item) -> Destination
 	) -> some View {
