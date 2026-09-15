@@ -278,6 +278,19 @@ extension SigningHandler {
 			)
 		}
 
+		if options.experiment_disableLiquidGlass {
+			infoDictionary.setObject(
+				true,
+				forKey: "UIDesignRequiresCompatibility" as NSCopying
+			)
+		}
+		if options.experiment_supportLiquidGlass {
+			infoDictionary.setObject(
+				false,
+				forKey: "UIDesignRequiresCompatibility" as NSCopying
+			)
+		}
+
 		// useless crap
 		if infoDictionary["UISupportedDevices"] != nil {
 			infoDictionary.removeObject(forKey: "UISupportedDevices")
