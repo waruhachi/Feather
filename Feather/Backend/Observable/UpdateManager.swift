@@ -172,13 +172,36 @@ final class UpdateManager: ObservableObject {
 			guard let appUUID = $1.appUUID else { return }
 			$0[appUUID] = $1
 		}
+		// Single-app checks also need the original import to recover signed metadata.
+		let importedApps = (try? Storage.shared.context.fetch(Imported.fetchRequest())) ?? []
+		let metadataCandidates = importedApps.compactMap { app -> SourceMetadataCandidate? in
+			guard
+				let uuid = app.uuid,
+				metadataByUUID[uuid] != nil
+			else {
+				return nil
+			}
+			return SourceMetadataCandidate(appUUID: uuid, app: app)
+		}
 
 		for localApp in localApps {
 			guard let localUUID = localApp.uuid else {
 				continue
 			}
 
-			let metadata = metadataByUUID[localUUID]
+			var metadata = metadataByUUID[localUUID]
+			if metadata == nil, let fallback = _fallbackMetadataCandidate(
+				for: localApp,
+				localUUID: localUUID,
+				candidates: metadataCandidates
+			) {
+				Storage.shared.copySourceMetadata(
+					from: fallback.appUUID,
+					to: localUUID,
+					kind: .signed
+				)
+				metadata = Storage.shared.sourceMetadata(for: localUUID)
+			}
 			guard metadata?.updatesDisabled != true else {
 				continue
 			}
@@ -681,6 +704,27 @@ final class UpdateManager: ObservableObject {
 		}
 	}
 
+	private func _fallbackMetadataCandidate(
+		for localApp: AppInfoPresentable,
+		localUUID: String,
+		candidates: [SourceMetadataCandidate]
+	) -> SourceMetadataCandidate? {
+		guard
+			localApp.isSigned,
+			let localIdentifier = localApp.identifier,
+			let localVersion = localApp.version
+		else {
+			return nil
+		}
+
+		return candidates.first {
+			$0.appUUID != localUUID
+				&& !$0.app.isSigned
+				&& $0.app.identifier == localIdentifier
+				&& $0.app.version == localVersion
+		}
+	}
+
 	private func _matchesStoredRepository(
 		storedSourceURL: URL,
 		sourceURL: URL
@@ -762,6 +806,11 @@ final class UpdateManager: ObservableObject {
 			|| lowercased.contains("rc") || lowercased.contains("pre")
 			|| lowercased.contains("preview")
 	}
+}
+
+private struct SourceMetadataCandidate {
+	let appUUID: String
+	let app: AppInfoPresentable
 }
 
 private struct ReleaseSource {
