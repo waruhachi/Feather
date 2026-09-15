@@ -56,6 +56,7 @@ final class UpdateManager: ObservableObject {
 	}
 
 	func setUpdatesDisabled(for app: AppInfoPresentable, disabled: Bool) {
+		objectWillChange.send()
 		Storage.shared.setUpdatesDisabled(for: app, disabled: disabled)
 		if disabled, let uuid = app.uuid {
 			updates[uuid] = nil
@@ -276,7 +277,11 @@ final class UpdateManager: ObservableObject {
 				continue
 			}
 
-			guard metadata?.skippedUpdateVersionID != update.versionID else {
+			// Preferences may change while a provider request is in flight.
+			let currentMetadata = Storage.shared.sourceMetadata(for: localUUID)
+			guard currentMetadata?.updatesDisabled != true,
+				currentMetadata?.skippedUpdateVersionID != update.versionID
+			else {
 				continue
 			}
 
@@ -695,13 +700,10 @@ final class UpdateManager: ObservableObject {
 			return matchingAsset
 		}
 
-		if assets.count == 1 {
-			return assets[0]
-		}
-
-		return assets.first {
+		let ipaAssets = assets.filter {
 			$0.name.lowercased().hasSuffix(".ipa")
 		}
+		return ipaAssets.count == 1 ? ipaAssets[0] : nil
 	}
 
 	private func _fallbackMetadataCandidate(
@@ -758,39 +760,8 @@ final class UpdateManager: ObservableObject {
 			== .orderedDescending
 	}
 
-	private func _compareVersions(_ lhs: String, _ rhs: String)
-		-> ComparisonResult
-	{
-		let lhsComponents = _numericVersionComponents(lhs)
-		let rhsComponents = _numericVersionComponents(rhs)
-		let count = max(lhsComponents.count, rhsComponents.count)
-
-		for index in 0..<count {
-			let lhsValue =
-				index < lhsComponents.count ? lhsComponents[index] : 0
-			let rhsValue =
-				index < rhsComponents.count ? rhsComponents[index] : 0
-
-			if lhsValue > rhsValue {
-				return .orderedDescending
-			} else if lhsValue < rhsValue {
-				return .orderedAscending
-			}
-		}
-
-		let lhsPrerelease = _isPrereleaseTag(lhs)
-		let rhsPrerelease = _isPrereleaseTag(rhs)
-		if lhsPrerelease != rhsPrerelease {
-			return lhsPrerelease ? .orderedAscending : .orderedDescending
-		}
-
-		return .orderedSame
-	}
-
-	private func _numericVersionComponents(_ version: String) -> [Int] {
-		_version(from: version)
-			.split { !$0.isNumber }
-			.compactMap { Int($0) }
+	private func _compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
+		UpdateVersion.compare(lhs, rhs)
 	}
 
 	private func _version(from tag: String) -> String {
@@ -801,10 +772,7 @@ final class UpdateManager: ObservableObject {
 	}
 
 	private func _isPrereleaseTag(_ tag: String) -> Bool {
-		let lowercased = tag.lowercased()
-		return lowercased.contains("alpha") || lowercased.contains("beta")
-			|| lowercased.contains("rc") || lowercased.contains("pre")
-			|| lowercased.contains("preview")
+		UpdateVersion.isPrerelease(tag)
 	}
 }
 

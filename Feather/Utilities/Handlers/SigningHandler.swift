@@ -136,6 +136,10 @@ final class SigningHandler: NSObject {
 		// iOS "26" (19) needs special treatment
 		try await _locateMachosAndFixupArm64eSlice(for: movedAppPath)
 
+		if _options.keychainIsolation {
+			try _isolateKeychainGroups(for: movedAppPath)
+		}
+
 		let handler = ZsignHandler(
 			appUrl: movedAppPath,
 			options: _options,
@@ -226,6 +230,144 @@ final class SigningHandler: NSObject {
 }
 
 extension SigningHandler {
+	private func _isolateKeychainGroups(for app: URL) throws {
+		guard let bundleID = Bundle(url: app)?.bundleIdentifier, !bundleID.isEmpty else {
+			return
+		}
+
+		guard let entitlements = _baseEntitlements() else {
+			return
+		}
+
+		let provisioningEntitlements = _provisioningEntitlements()
+		let teamID = provisioningEntitlements.flatMap {
+			_teamIdentifier(from: $0 as NSDictionary)
+		} ?? _teamIdentifier(from: entitlements)
+		guard let teamID else {
+			return
+		}
+
+		var groups = entitlements["keychain-access-groups"] as? [String] ?? []
+		if let executable = Bundle(url: app)?.executableURL {
+			groups += MachOEntitlements.keychainAccessGroups(forExecutableAt: executable)
+		}
+
+		let isolatedGroups = _isolatedGroups(
+			groups,
+			teamID: teamID,
+			bundleID: bundleID
+		)
+		guard !isolatedGroups.isEmpty else {
+			return
+		}
+
+		entitlements["keychain-access-groups"] = isolatedGroups
+
+		let entitlementsURL = _uniqueWorkDir.appendingPathComponent(
+			"entitlements.plist"
+		)
+		let data = try PropertyListSerialization.data(
+			fromPropertyList: entitlements,
+			format: .xml,
+			options: 0
+		)
+		try data.write(to: entitlementsURL)
+		_options.appEntitlementsFile = entitlementsURL
+	}
+
+	private func _baseEntitlements() -> NSMutableDictionary? {
+		if let file = _options.appEntitlementsFile,
+			let dictionary = NSMutableDictionary(contentsOf: file)
+		{
+			return dictionary
+		}
+
+		guard let provisioningEntitlements = _provisioningEntitlements() else {
+			return nil
+		}
+
+		return NSMutableDictionary(dictionary: provisioningEntitlements)
+	}
+
+	private func _provisioningEntitlements() -> [String: Any]? {
+		guard
+			let certificate = appCertificate,
+			let entitlements = Storage.shared.getProvisionFileDecoded(for: certificate)?
+				.Entitlements
+		else {
+			return nil
+		}
+
+		return entitlements.mapValues(\.value)
+	}
+
+	private func _teamIdentifier(from entitlements: NSDictionary) -> String? {
+		if let applicationIdentifier = entitlements["application-identifier"] as? String,
+			let teamID = applicationIdentifier.split(separator: ".").first.map(String.init),
+			_isTeamIdentifier(teamID)
+		{
+			return teamID
+		}
+
+		if let teamID = entitlements["com.apple.developer.team-identifier"] as? String,
+			_isTeamIdentifier(teamID)
+		{
+			return teamID
+		}
+
+		for group in entitlements["keychain-access-groups"] as? [String] ?? [] {
+			if let teamID = group.split(separator: ".").first.map(String.init),
+				_isTeamIdentifier(teamID)
+			{
+				return teamID
+			}
+		}
+
+		return nil
+	}
+
+	private func _isolatedGroups(
+		_ groups: [String],
+		teamID: String,
+		bundleID: String
+	) -> [String] {
+		var result: [String] = []
+		var seen = Set<String>()
+
+		func append(_ group: String) {
+			if seen.insert(group).inserted {
+				result.append(group)
+			}
+		}
+
+		append("\(teamID).\(bundleID)")
+
+		for group in groups {
+			let expanded = group.replacingOccurrences(of: "*", with: bundleID)
+			guard let dot = expanded.firstIndex(of: ".") else {
+				continue
+			}
+			guard _isTeamIdentifier(String(expanded[..<dot])) else {
+				continue
+			}
+
+			let suffix = String(expanded[expanded.index(after: dot)...])
+			guard !suffix.isEmpty else {
+				continue
+			}
+			append("\(teamID).\(suffix)")
+		}
+
+		return result
+	}
+
+	private func _isTeamIdentifier(_ value: String) -> Bool {
+		value.count == 10
+			&& value.allSatisfy { character in
+				(character.isLetter && character.isUppercase) || character.isNumber
+			}
+	}
+
 	private func _modifyDict(
 		using infoDictionary: NSMutableDictionary,
 		with options: Options,

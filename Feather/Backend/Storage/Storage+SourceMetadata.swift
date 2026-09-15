@@ -375,7 +375,15 @@ extension Storage {
 			? SourceLinkedAppKind.signed.rawValue
 			: SourceLinkedAppKind.imported.rawValue
 		if metadata.originKind == nil {
-			metadata.originKind = IPAOriginKind.unknown.rawValue
+			metadata.originKind = app.source == nil
+				? IPAOriginKind.unknown.rawValue : IPAOriginKind.featherSource.rawValue
+		}
+		if metadata.sourceRepositoryURL == nil, let source = app.source,
+			metadata.originKind == IPAOriginKind.featherSource.rawValue
+		{
+			metadata.originURL = source
+			metadata.sourceRepositoryURL = source
+			metadata.updateProviderKind = UpdateProviderKind.featherSource.rawValue
 		}
 		if metadata.sourceAppIdentifier == nil {
 			metadata.sourceAppIdentifier = app.identifier

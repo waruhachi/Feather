@@ -60,6 +60,10 @@ class OptionsManager: ObservableObject {
 			raw["experiment_disableLiquidGlass"] = false
 		}
 
+		if raw["keychainIsolation"] == nil {
+			raw["keychainIsolation"] = false
+		}
+
 		guard
 			let patchedData = try? JSONSerialization.data(withJSONObject: raw),
 			let patchedOptions = try? JSONDecoder().decode(
@@ -173,6 +177,8 @@ struct Options: Codable, Equatable {
 	var changeLanguageFilesForCustomDisplayName: Bool
 	/// If tweaks should be injected into all app extensions (PlugIns and Extensions)
 	var injectIntoExtensions: Bool
+	/// Give each signed app keychain groups derived from its bundle identifier.
+	var keychainIsolation: Bool
 
 	// MARK: Experiments
 
@@ -221,6 +227,7 @@ struct Options: Codable, Equatable {
 		removeProvisioning: false,
 		changeLanguageFilesForCustomDisplayName: false,
 		injectIntoExtensions: false,
+		keychainIsolation: false,
 
 		// MARK: Experiments
 
