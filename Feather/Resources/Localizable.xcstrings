@@ -4385,6 +4385,17 @@
         }
       }
     },
+    "Do you want to download and install this file?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Do you want to download and install this file?"
+          }
+        }
+      }
+    },
     "Do you want to export your certificate to an external app? That app will be able to sign apps using your certificate." : {
       "extractionState" : "manual",
       "localizations" : {
