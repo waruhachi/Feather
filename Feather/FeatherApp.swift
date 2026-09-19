@@ -130,7 +130,7 @@ struct FeatherApp: App {
 					title: .localized("Install"),
 					message: .localized("Do you want to download and install this file?") + "\n\n\(downloadURL)",
 					actions: [
-						UIAlertAction(title: "Install", style: .default) { _ in
+						UIAlertAction(title: .localized("Install"), style: .default) { _ in
 							_ = DownloadManager.shared.startDownload(from: downloadURL)
 						}
 					]

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Zsign
+import ZsignC
 import UIKit
 import OSLog
 
