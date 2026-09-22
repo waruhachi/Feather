@@ -7,8 +7,8 @@
 //
 
 import Foundation
-import OSLog
 import Zsign
+import OSLog
 
 class TweakHandler {
 	private let _fileManager = FileManager.default
