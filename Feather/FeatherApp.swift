@@ -126,7 +126,15 @@ struct FeatherApp: App {
 				let fullPath = url.validatedScheme(after: "/install/"),
 				let downloadURL = URL(string: fullPath)
 			{
-				_ = DownloadManager.shared.startDownload(from: downloadURL)
+				UIAlertController.showAlertWithCancel(
+					title: .localized("Install"),
+					message: .localized("Do you want to download and install this file?") + "\n\n\(downloadURL)",
+					actions: [
+						UIAlertAction(title: .localized("Install"), style: .default) { _ in
+							_ = DownloadManager.shared.startDownload(from: downloadURL)
+						}
+					]
+				)
 			}
 		} else {
 			if url.pathExtension == "ipa" || url.pathExtension == "tipa" {

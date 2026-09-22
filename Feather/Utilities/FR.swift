@@ -10,8 +10,10 @@ import Foundation.NSURL
 import IDeviceSwift
 import NimbleJSON
 import UIKit.UIImage
-import Zsign
 import ZsignC
+import NimbleJSON
+import AltSourceKit
+import IDeviceSwift
 
 enum FR {
 	static func handlePackageFile(
@@ -114,10 +116,10 @@ enum FR {
 		defer {
 			password_check_fix_free(provision.path)
 		}
-
+		
 		password_check_fix(provision.path)
-
-		if !p12_password_check(key.path, password) {
+		
+		if (!p12_password_check(key.path, password)) {
 			return false
 		}
 

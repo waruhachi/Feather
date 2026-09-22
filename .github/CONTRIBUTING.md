@@ -6,6 +6,11 @@ Any contributions should follow the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## Rules
 
+> [!WARNING]
+> **Warning for AI Usage**
+>
+> Using AI to generate your pull request will result in your pull request automatically closed, and "vibecoded" contributions will lead to same results. Pull requests are also reviewed by an actual human and not an AI, so avoid wasting peoples time by actually following this rule.
+
 - **No usage of any exploits of any kind**.
 - **No contributions related to retrieving any signing certificates owned by companies**.
 - **Modifying any hardcoded links should be discussed before changing**.

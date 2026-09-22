@@ -6,8 +6,8 @@
 //
 
 import Foundation
-import UIKit
 import Zsign
+import UIKit
 
 final class ZsignHandler {
 	var hadError: Error?
