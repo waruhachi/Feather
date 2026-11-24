@@ -12,7 +12,9 @@ import UIKit
 class OptionsManager: ObservableObject {
 	static let shared = OptionsManager()
 
-	@Published var options: Options
+	@Published var options: Options {
+		didSet { saveOptions() }
+	}
 	private let _key = "signing_options"
 
 	init() {
@@ -42,39 +44,20 @@ class OptionsManager: ObservableObject {
 		}
 
 		guard
-			var raw = (try? JSONSerialization.jsonObject(with: data))
+			let saved = (try? JSONSerialization.jsonObject(with: data))
+				as? [String: Any],
+			let defaultData = try? JSONEncoder().encode(Options.defaultOptions),
+			var merged = (try? JSONSerialization.jsonObject(with: defaultData))
 				as? [String: Any]
 		else {
 			return nil
 		}
 
-		if raw["injectionFrameworks"] == nil {
-			raw["injectionFrameworks"] = []
-		}
-
-		if raw["injectedAppExtensions"] == nil {
-			raw["injectedAppExtensions"] = []
-		}
-
-		if raw["experiment_disableLiquidGlass"] == nil {
-			raw["experiment_disableLiquidGlass"] = false
-		}
-
-		if raw["keychainIsolation"] == nil {
-			raw["keychainIsolation"] = false
-		}
-
-		guard
-			let patchedData = try? JSONSerialization.data(withJSONObject: raw),
-			let patchedOptions = try? JSONDecoder().decode(
-				Options.self,
-				from: patchedData
-			)
-		else {
+		merged.merge(saved) { _, savedValue in savedValue }
+		guard let mergedData = try? JSONSerialization.data(withJSONObject: merged) else {
 			return nil
 		}
-
-		return patchedOptions
+		return try? JSONDecoder().decode(Options.self, from: mergedData)
 	}
 
 	private static func _migrateFrameworksIntoTweaks(in options: Options)
@@ -102,14 +85,12 @@ class OptionsManager: ObservableObject {
 	func saveOptions() {
 		if let encoded = try? JSONEncoder().encode(options) {
 			UserDefaults.standard.set(encoded, forKey: _key)
-			objectWillChange.send()
 		}
 	}
 
 	/// Resets options to default
 	func resetToDefaults() {
 		options = Options.defaultOptions
-		saveOptions()
 	}
 }
 
@@ -179,6 +160,8 @@ struct Options: Codable, Equatable {
 	var injectIntoExtensions: Bool
 	/// Give each signed app keychain groups derived from its bundle identifier.
 	var keychainIsolation: Bool
+	/// Merge the provisioning profile with keychain groups from the app.
+	var mergeEntitlements: Bool
 
 	// MARK: Experiments
 
@@ -228,6 +211,7 @@ struct Options: Codable, Equatable {
 		changeLanguageFilesForCustomDisplayName: false,
 		injectIntoExtensions: false,
 		keychainIsolation: false,
+		mergeEntitlements: false,
 
 		// MARK: Experiments
 

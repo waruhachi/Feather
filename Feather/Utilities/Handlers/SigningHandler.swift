@@ -136,6 +136,10 @@ final class SigningHandler: NSObject {
 		// iOS "26" (19) needs special treatment
 		try await _locateMachosAndFixupArm64eSlice(for: movedAppPath)
 
+		if _options.mergeEntitlements && _options.appEntitlementsFile == nil {
+			try _mergeEntitlements(for: movedAppPath)
+		}
+
 		if _options.keychainIsolation {
 			try _isolateKeychainGroups(for: movedAppPath)
 		}
@@ -230,6 +234,66 @@ final class SigningHandler: NSObject {
 }
 
 extension SigningHandler {
+	private func _mergeEntitlements(for app: URL) throws {
+		guard let executable = Bundle(url: app)?.executableURL else {
+			throw SigningFileHandlerError.appNotFound
+		}
+
+		guard
+			let binaryEntitlements = MachOEntitlements.read(forExecutableAt: executable),
+			let certificate = appCertificate,
+			let profile = Storage.shared.getProvisionFileDecoded(for: certificate),
+			let teamID = profile.TeamIdentifier.first
+		else {
+			return
+		}
+
+		var entitlements = (profile.Entitlements ?? [:]).mapValues(\.value)
+		if let bundleID = Bundle(url: app)?.bundleIdentifier {
+			func expandWildcards(in value: Any) -> Any {
+				switch value {
+				case let string as String:
+					return string.replacingOccurrences(of: "*", with: bundleID)
+				case let array as [Any]:
+					return array.map { expandWildcards(in: $0) }
+				case let dictionary as [String: Any]:
+					return dictionary.mapValues { expandWildcards(in: $0) }
+				default:
+					return value
+				}
+			}
+
+			for key in entitlements.keys where key != "application-identifier"
+				&& key != "com.apple.developer.associated-domains"
+			{
+				if let value = entitlements[key] {
+					entitlements[key] = expandWildcards(in: value)
+				}
+			}
+		}
+
+		// Use the main executable as the source for the signing entitlement override.
+		if let groups = (binaryEntitlements["keychain-access-groups"]
+			?? entitlements["keychain-access-groups"]) as? [String]
+		{
+			entitlements["keychain-access-groups"] = groups.compactMap { group -> String? in
+				guard group.range(of: "^[A-Z0-9]{10}\\.", options: .regularExpression) != nil else {
+					return nil
+				}
+				return teamID + "." + group.dropFirst(11)
+			}
+		}
+
+		let entitlementsURL = _uniqueWorkDir.appendingPathComponent("merged-entitlements.plist")
+		let data = try PropertyListSerialization.data(
+			fromPropertyList: entitlements,
+			format: .xml,
+			options: 0
+		)
+		try data.write(to: entitlementsURL, options: .atomic)
+		_options.appEntitlementsFile = entitlementsURL
+	}
+
 	private func _isolateKeychainGroups(for app: URL) throws {
 		guard let bundleID = Bundle(url: app)?.bundleIdentifier, !bundleID.isEmpty else {
 			return

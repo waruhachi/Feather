@@ -79,6 +79,13 @@ extension LibraryInfoView {
 			if let date = app.date {
 				_infoCell(.localized("Date Added"), desc: date.formatted())
 			}
+
+			if
+				let appDirectory = Storage.shared.getAppDirectory(for: app),
+				let appMinimumOS = Bundle(url: appDirectory)?.minimumOSVersion
+			{
+				_infoCell(.localized("Minimum OS"), desc: appMinimumOS)
+			}
 		}
 	}
 
@@ -189,6 +196,20 @@ extension LibraryInfoView {
 		NBSection(.localized("Executable")) {
 			NavigationLink(.localized("Dylibs")) {
 				SigningDylibView(app: app, options: .constant(nil))
+			}
+			NavigationLink(.localized("Entitlements")) {
+				if
+					let appDirectory = Storage.shared.getAppDirectory(for: app),
+					let executable = Bundle(url: appDirectory)?.executableURL,
+					let rawDict = MachOEntitlements.read(forExecutableAt: executable)
+				{
+					let binaryEntitlementsDict = rawDict.mapValues { AnyCodable($0) }
+					CertificatesInfoEntitlementView(entitlements: binaryEntitlementsDict)
+				} else {
+					Text(.localized("No Entitlements listed."))
+						.font(.footnote)
+						.foregroundColor(.disabled())
+				}
 			}
 		}
 	}
