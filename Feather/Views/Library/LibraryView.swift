@@ -24,6 +24,7 @@ struct LibraryView: View {
 	@State private var wentToBackground = false
 	@State private var pendingImportAfterInstall = false
 	@State private var _isDownloadingPresenting = false
+	@State private var _linkImportError: String?
 	@State private var _alertDownloadString: String = ""  // for _isDownloadingPresenting
 	@State private var _updateCheckRotation = 0.0
 	@State private var _isUpdateCheckCompleteVisible = false
@@ -89,6 +90,40 @@ struct LibraryView: View {
 	var body: some View {
 		NBNavigationView(.localized("Library")) {
 			NBListAdaptable {
+				if !_editMode.isEditing, _searchText.isEmpty, _selectedScope == .all {
+					let apps = _updatableApps
+					if !apps.isEmpty {
+						NBSection(.localized("Updates Available"), secondary: apps.count.description) {
+							let downloadable = apps.filter { updateManager.update(for: $0)?.canDownload == true }
+							if !downloadable.isEmpty {
+								Button(.localized("Update All"), systemImage: "arrow.down.circle") {
+									_presentWork(.updates, apps: downloadable)
+								}
+							}
+							ForEach(apps.map { AnyApp(base: $0) }) { item in
+								if let update = updateManager.update(for: item.base) {
+									Button {
+										if update.canDownload {
+											_presentWork(.updates, apps: [item.base])
+										} else if let url = update.webURL {
+											UIApplication.open(url)
+										}
+									} label: {
+										LabeledContent(update.appName, value: update.remoteVersion)
+									}
+									.contextMenu {
+										Button(.localized("Skip This Version"), systemImage: "forward.end") {
+											updateManager.skipUpdate(for: item.base)
+										}
+										Button(.localized("Hold Updates"), systemImage: "bell.slash") {
+											updateManager.setUpdatesDisabled(for: item.base, disabled: true)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
 				if !_filteredSignedApps.isEmpty,
 					_selectedScope == .all || _selectedScope == .signed
 				{
@@ -232,10 +267,11 @@ struct LibraryView: View {
 						.accessibilityLabel(.localized("Check for Updates"))
 					}
 
-					if !updateManager.updates.isEmpty {
+					let downloadable = _updatableApps.filter { updateManager.update(for: $0)?.canDownload == true }
+					if !downloadable.isEmpty {
 						ToolbarItem(placement: .topBarTrailing) {
 							Button {
-								_presentWork(.updates, apps: _updatableApps)
+								_presentWork(.updates, apps: downloadable)
 							} label: {
 								Image(systemName: "arrow.down.circle")
 							}
@@ -328,13 +364,16 @@ struct LibraryView: View {
 					)
 					_alertDownloadString = ""
 
-					if let url = URL(string: input) {
-						_ = downloadManager.startDownload(
-							from: url,
-							id: "FeatherManualDownload_\(UUID().uuidString)"
-						)
-					}
+					Task { await _importLink(input) }
 				}
+			}
+			.alert(.localized("Import Failed"), isPresented: Binding(
+				get: { _linkImportError != nil },
+				set: { if !$0 { _linkImportError = nil } }
+			)) {
+				Button(.localized("OK"), role: .cancel) {}
+			} message: {
+				Text(_linkImportError ?? "")
 			}
 			.onReceive(NotificationCenter.default.publisher(for: .featherInstallApp)) { notification in
 				guard let uuid = notification.object as? String, let signed = _signedApps.first(where: { $0.uuid == uuid }) else { return }
@@ -434,12 +473,26 @@ extension LibraryView {
 			else { return false }
 			return updateManager.update(for: app) != nil
 		}
-		let signedOriginalIDs = Set(signed.compactMap { updateManager.update(for: $0)?.bundleIdentifier })
+		var seenOriginalIDs = Set(signed.compactMap { updateManager.update(for: $0)?.bundleIdentifier })
 		let imported = _importedApps.filter { app in
 			guard let update = updateManager.update(for: app) else { return false }
-			return !signedOriginalIDs.contains(update.bundleIdentifier)
+			return seenOriginalIDs.insert(update.bundleIdentifier).inserted
 		}
 		return signed.map { $0 as AppInfoPresentable } + imported.map { $0 as AppInfoPresentable }
+	}
+
+	@MainActor
+	private func _importLink(_ input: String) async {
+		do {
+			let url = try await IPALink.resolve(input)
+			_ = downloadManager.startDownload(from: url, id: "FeatherManualDownload_" + UUID().uuidString) { outcome in
+				if case .failure(let error) = outcome, (error as? URLError)?.code != .cancelled {
+					_linkImportError = error.localizedDescription
+				}
+			}
+		} catch {
+			_linkImportError = error.localizedDescription
+		}
 	}
 
 	private func _presentWork(_ purpose: LibraryWork.Purpose, apps: [AppInfoPresentable]) {

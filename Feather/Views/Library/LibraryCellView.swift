@@ -193,8 +193,7 @@ extension LibraryCellView {
 	}
 
 	private func _hasUpdateContextActions(for app: AppInfoPresentable) -> Bool {
-		updateManager.update(for: app) != nil
-			|| Storage.shared.updatesDisabled(for: app.uuid)
+		app.uuid != nil
 	}
 
 	@ViewBuilder
@@ -215,25 +214,24 @@ extension LibraryCellView {
 				}
 			}
 
-			Button(.localized("Skip This Update"), systemImage: "forward.end") {
+			Button(.localized("Skip This Version"), systemImage: "forward.end") {
 				updateManager.skipUpdate(for: app)
 				Task {
 					await _refreshUpdate(for: app)
 				}
 			}
 
-			Button(.localized("Disable Updates"), systemImage: "bell.slash") {
-				updateManager.setUpdatesDisabled(for: app, disabled: true)
-				Task {
-					await _refreshUpdate(for: app)
-				}
-			}
-		} else if Storage.shared.updatesDisabled(for: app.uuid) {
-			Button(.localized("Enable Updates"), systemImage: "bell") {
+		}
+		if Storage.shared.updatesDisabled(for: app.uuid) {
+			Button(.localized("Resume Updates"), systemImage: "bell") {
 				updateManager.setUpdatesDisabled(for: app, disabled: false)
 				Task {
 					await _refreshUpdate(for: app)
 				}
+			}
+		} else {
+			Button(.localized("Hold Updates"), systemImage: "bell.slash") {
+				updateManager.setUpdatesDisabled(for: app, disabled: true)
 			}
 		}
 	}

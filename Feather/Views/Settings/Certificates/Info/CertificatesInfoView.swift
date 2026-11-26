@@ -4,16 +4,35 @@
 //
 //  Created by samara on 20.04.2025.
 //
+import CoreData
 import SwiftUI
 import NimbleViews
-import Zsign
 
 // MARK: - View
 struct CertificatesInfoView: View {
 	@Environment(\.dismiss) var dismiss
 	@State var data: Certificate?
 
-	var cert: CertificatePair
+	@ObservedObject var cert: CertificatePair
+	@FetchRequest private var signedApps: FetchedResults<Signed>
+	@State private var recovery: LibraryWork?
+
+	init(cert: CertificatePair) {
+		self.cert = cert
+		_signedApps = FetchRequest(
+			entity: Signed.entity(),
+			sortDescriptors: [NSSortDescriptor(keyPath: \Signed.date, ascending: false)],
+			predicate: NSPredicate(format: "certificate == %@", cert)
+		)
+	}
+
+	private var affectedApps: [Signed] {
+		var seen = Set<String>()
+		return signedApps.filter { app in
+			guard let identifier = app.identifier ?? app.uuid else { return false }
+			return seen.insert(identifier).inserted
+		}
+	}
 
 	// MARK: Body
 	var body: some View {
@@ -34,6 +53,22 @@ struct CertificatesInfoView: View {
 					_miscSection(data: data)
 				}
 
+				let apps = affectedApps
+				NBSection(.localized("Affected Apps"), secondary: apps.count.description) {
+					if apps.isEmpty {
+						Text(.localized("No signed copies use this certificate."))
+							.foregroundStyle(.secondary)
+					}
+					ForEach(apps, id: \.objectID) { app in
+						LabeledContent(app.name ?? .localized("Unknown"), value: app.version ?? "")
+					}
+					if !apps.isEmpty {
+						Button(.localized("Re-sign Affected Apps"), systemImage: "signature") {
+							recovery = LibraryWork(purpose: .signing, apps: apps, sources: [], offersReplacementCertificate: true)
+						}
+					}
+				}
+
 				Section {
 					Button(.localized("Open in Files"), systemImage: "folder") {
 						UIApplication.open(
@@ -46,6 +81,7 @@ struct CertificatesInfoView: View {
 			.toolbar {
 				NBToolbarButton(role: .close)
 			}
+			.sheet(item: $recovery) { LibraryWorkView(work: $0) }
 		}
 		.onAppear {
 			data = Storage.shared.getProvisionFileDecoded(for: cert)
@@ -61,6 +97,12 @@ extension CertificatesInfoView {
 			_info(.localized("Name"), description: data.Name)
 			_info(.localized("AppID Name"), description: data.AppIDName)
 			_info(.localized("Team Name"), description: data.TeamName)
+			if let devices = data.ProvisionedDevices {
+				_info(.localized("Provisioned Devices"), description: devices.count.formatted())
+			}
+			if let capabilities = data.Entitlements {
+				_info(.localized("Entitlements"), description: capabilities.count.formatted())
+			}
 		}
 
 		Section {

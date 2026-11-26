@@ -11,6 +11,7 @@ struct LibraryWork: Identifiable {
 	let purpose: Purpose
 	let apps: [AppInfoPresentable]
 	let sources: [AltSource]
+	var offersReplacementCertificate = false
 }
 
 struct LibraryWorkView: View {
@@ -32,6 +33,13 @@ struct LibraryWorkView: View {
 	@AppStorage("Feather.dismissInstallAfterFinish") private var dismissAfterFinish = false
 	@AppStorage("Feather.openImportAfterInstall") private var openImportAfterInstall = false
 	@State private var loaded = false
+	@State private var replacementCertificateID: String?
+	@State private var completedCount = 0
+	@State private var workCount = 0
+
+	private var replacementCertificates: [CertificatePair] {
+		certificates.filter { $0.uuid != nil && !$0.revoked && ($0.expiration.map { $0 > Date() } ?? false) }
+	}
 
 	private struct InstallItem: Identifiable {
 		let id = UUID()
@@ -58,6 +66,19 @@ struct LibraryWorkView: View {
 	var body: some View {
 		NBNavigationView(title, displayMode: .inline) {
 			Form {
+				if work.offersReplacementCertificate {
+					Section {
+						Picker(.localized("Replacement Certificate"), selection: $replacementCertificateID) {
+							Text(.localized("Select Certificate")).tag(nil as String?)
+							ForEach(replacementCertificates, id: \.objectID) { cert in
+								Text(cert.nickname ?? .localized("Certificate")).tag(cert.uuid)
+							}
+						}
+						.disabled(task != nil)
+					} footer: {
+						Text(.localized("A different signing team may require installing a fresh copy."))
+					}
+				}
 				if work.purpose == .updates {
 					Picker(.localized("Action"), selection: $action) {
 						ForEach(Action.allCases, id: \.self) { action in
@@ -84,6 +105,15 @@ struct LibraryWorkView: View {
 					}
 				}
 			}
+			.safeAreaInset(edge: .bottom) {
+				if task != nil && workCount > 0 {
+					ProgressView(value: Double(completedCount), total: Double(workCount)) {
+						Text(verbatim: String.localized("%lld of %lld processed", arguments: completedCount, workCount))
+					}
+					.padding()
+					.background(.regularMaterial)
+				}
+			}
 			.searchable(text: $search)
 			.toolbar {
 				ToolbarItem(placement: .cancellationAction) {
@@ -93,7 +123,8 @@ struct LibraryWorkView: View {
 				}
 				ToolbarItem(placement: .confirmationAction) {
 					Button(.localized(work.purpose == .updates ? "Update All" : "Start"), action: start)
-						.disabled(selected.isEmpty || task != nil || !inFlight.isEmpty)
+						.disabled(selected.isEmpty || task != nil || !inFlight.isEmpty
+							|| (work.offersReplacementCertificate && replacementCertificateID == nil))
 				}
 			}
 			.sheet(isPresented: $showingInstalls, onDismiss: {
@@ -182,6 +213,8 @@ struct LibraryWorkView: View {
 
 	private func start() {
 		let pending = work.apps.compactMap(makeRow).filter { selected.contains($0.id) }
+		completedCount = 0
+		workCount = pending.count
 		task = Task { @MainActor in
 			defer { task = nil; activeID = nil }
 			for row in pending {
@@ -194,6 +227,7 @@ struct LibraryWorkView: View {
 				} catch {
 					results[row.id] = error.localizedDescription
 				}
+				completedCount += 1
 			}
 			if inFlight.isEmpty { installNext() }
 		}
@@ -239,7 +273,9 @@ struct LibraryWorkView: View {
 		let fallback = Storage.shared.getCertificate(from: row.app)
 			?? (certificates.indices.contains(defaultCertificate) ? certificates[defaultCertificate] : nil)
 		let certificate: CertificatePair?
-		if let pin = recipe?.certificateID {
+		if work.offersReplacementCertificate {
+			certificate = replacementCertificates.first { $0.uuid == replacementCertificateID }
+		} else if let pin = recipe?.certificateID {
 			guard let match = certificates.first(where: { $0.uuid == pin }) else {
 				throw SigningPreflight.savedCertificateUnavailable
 			}
@@ -250,11 +286,12 @@ struct LibraryWorkView: View {
 		guard let certificate else { throw WorkflowError.noCertificate }
 
 		let defaults = OptionsManager.shared.options
-		var options = recipe?.options(using: defaults) ?? defaults
+		// The existing signed bundle already contains the recipe's modifications.
+		var options = work.offersReplacementCertificate ? .defaultOptions : recipe?.options(using: defaults) ?? defaults
 		options.signingOption = .default
 		// The single-app signing sheet owns confirmation of extension replacements.
 		options.injectedAppExtensions = []
-		if work.purpose == .updates && row.app.isSigned {
+		if row.app.isSigned && (work.purpose == .updates || work.offersReplacementCertificate) {
 			options.appIdentifier = row.app.identifier
 		} else if recipe == nil, let identifier = input.identifier {
 			if options.ppqProtection, certificate.ppQCheck {
@@ -262,7 +299,7 @@ struct LibraryWorkView: View {
 			}
 			options.appIdentifier = options.identifiers[identifier] ?? options.appIdentifier
 		}
-		if recipe == nil {
+		if recipe == nil && !work.offersReplacementCertificate {
 			options.appName = input.name.flatMap { options.displayNames[$0] } ?? options.appName
 		}
 		if work.purpose == .updates && row.app.isSigned {
@@ -273,7 +310,15 @@ struct LibraryWorkView: View {
 		{
 			throw SigningPreflight.newerSystemRequired(minimum)
 		}
-		let uuid = try await FR.signPackage(input, using: options, icon: recipe?.icon, certificate: certificate)
+		let uuid = try await FR.signPackage(input, using: options, icon: work.offersReplacementCertificate ? nil : recipe?.icon, certificate: certificate)
+		if work.offersReplacementCertificate, let recipe, let identifier = row.app.identifier {
+			do {
+				try SigningRecipe.save(for: identifier, options: recipe.options, certificate: certificate, icon: recipe.icon)
+			} catch {
+				results[row.id] = .localized("Re-signed. Could not update the saved certificate.")
+				return
+			}
+		}
 		if options.post_deleteAppAfterSigned, !input.isSigned {
 			Storage.shared.deleteApp(for: input)
 		}
