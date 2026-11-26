@@ -43,14 +43,15 @@ struct SourceAppInstallControls: View {
 				SourceAppTransferProgress(transfer: transfer)
 			} else if let installedID {
 				Button(.localized("Open")) {
-					if !InstalledAppProbe.open(installedID) {
-						message = .localized("Open the app from your Home Screen.")
-					}
+					UIApplication.openApp(with: installedID)
 				}
 				.buttonStyle(.borderedProminent)
 			} else if let signed {
-				Button(.localized("Install")) { installSheet = signed }
-					.buttonStyle(.borderedProminent)
+				Button(.localized("Install")) {
+					message = .localized("Installing")
+					installSheet = signed
+				}
+				.buttonStyle(.borderedProminent)
 			} else if let imported {
 				Button(.localized("Sign")) { signingSheet = imported }
 					.buttonStyle(.borderedProminent)
@@ -74,7 +75,9 @@ struct SourceAppInstallControls: View {
 				message = .localized("Ready to Install")
 			}
 		}
-		.sheet(item: $installSheet) { item in
+		.sheet(item: $installSheet, onDismiss: {
+			if message == String.localized("Installing") { message = .localized("Install Unconfirmed") }
+		}) { item in
 			InstallPreviewView(app: item.base, onOutcome: { status in message = status }, onVerifiedInstall: {
 				installedID = item.base.identifier
 			})

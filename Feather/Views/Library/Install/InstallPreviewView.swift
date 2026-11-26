@@ -24,6 +24,7 @@ struct InstallPreviewView: View {
 	@State private var didFinish = false
 	@State private var didReceivePayload = false
 	@State private var verifiedOTA = false
+	@State private var activityID: UUID?
 	@AppStorage("Feather.dismissInstallAfterFinish") private var dismissAfterFinish = false
 	@AppStorage("Feather.openImportAfterInstall") private var openImportAfterInstall = false
 	
@@ -100,13 +101,16 @@ struct InstallPreviewView: View {
 					onVerifiedInstall?()
 					Storage.shared.finishInstall(app, protecting: protectedCopies())
 				}
-				finish(.localized(verified ? "Installed" : "Finished. Check Home Screen."), completed: true)
+				finish(.localized(verified ? "Installed" : "Finished. Check Home Screen."), completed: true, verified: verified)
 			case .completed(.failure(let error)), .broken(let error):
 				finish(error.localizedDescription, completed: false)
 			default: break
 			}
 		}
 		.onAppear(perform: _install)
+		.onChange(of: InstallProgressView.progress(for: viewModel, otaPayload: installer.payloadProgress)) { progress in
+			if let activityID { WorkLiveActivity.update(activityID, progress: progress) }
+		}
 		
 		#if !targetEnvironment(macCatalyst)
 		.onAppear {
@@ -115,6 +119,7 @@ struct InstallPreviewView: View {
 		#endif
 		
 		.onDisappear {
+			endActivity(.cancelled)
 			installTask?.cancel()
 			installTask = nil
 			progressTask?.cancel()
@@ -168,6 +173,9 @@ struct InstallPreviewView: View {
 			return
 		}
 				
+		if !isSharing {
+			activityID = WorkLiveActivity.begin(.installing, name: app.name ?? .localized("Unknown"))
+		}
 		installTask = Task.detached {
 			do {
 				let handler = await ArchiveHandler(app: app, viewModel: viewModel)
@@ -235,9 +243,16 @@ struct InstallPreviewView: View {
 		return false
 	}
 
-	private func finish(_ message: String, completed: Bool) {
+	private func endActivity(_ outcome: WorkLiveActivity.Outcome) {
+		guard let activityID else { return }
+		WorkLiveActivity.finish(activityID, outcome: outcome)
+		self.activityID = nil
+	}
+
+	private func finish(_ message: String, completed: Bool, verified: Bool = false) {
 		guard !didFinish else { return }
 		didFinish = true
+		endActivity(completed ? (verified ? .installed : .unconfirmed) : .failed)
 		progressTask?.cancel()
 		progressTask = nil
 		#if !targetEnvironment(macCatalyst)

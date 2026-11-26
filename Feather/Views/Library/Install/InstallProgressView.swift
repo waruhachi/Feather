@@ -16,6 +16,10 @@ struct InstallProgressView: View {
 	var otaPayload: OTAPayloadProgress.Snapshot?
 
 	private var overallProgress: Double {
+		Self.progress(for: viewModel, otaPayload: otaPayload)
+	}
+
+	static func progress(for viewModel: InstallerStatusViewModel, otaPayload: OTAPayloadProgress.Snapshot?) -> Double {
 		if viewModel.isIDevice { return viewModel.overallProgress }
 		return (viewModel.packageProgress + (otaPayload?.fraction ?? 0) + viewModel.installProgress) / 3
 	}

@@ -95,6 +95,12 @@ private extension FeatherDownloadAttributes.ContentState {
 		case .finished: "Added to Library"
 		case .failed: "Download or import failed"
 		case .cancelled: "Cancelled"
+		case .signing: "Signing"
+		case .installing: "Installing"
+		case .signed: "Signed"
+		case .installed: "Installed"
+		case .installationUnconfirmed: "Check Home Screen"
+		case .workFailed: "Operation Failed"
 		}
 	}
 
@@ -107,6 +113,11 @@ private extension FeatherDownloadAttributes.ContentState {
 		case .finished: "checkmark.circle"
 		case .failed: "exclamationmark.circle"
 		case .cancelled: "xmark.circle"
+		case .signing: "signature"
+		case .installing: "square.and.arrow.down"
+		case .signed, .installed: "checkmark.circle"
+		case .installationUnconfirmed: "questionmark.circle"
+		case .workFailed: "exclamationmark.circle"
 		}
 	}
 }

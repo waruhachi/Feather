@@ -8,19 +8,6 @@ final class InstalledAppProbe {
     // before callers necessarily sample the final update on this live object.
     private var lastProgress: Progress?
 
-    static func open(_ identifier: String) -> Bool {
-        let selector = NSSelectorFromString("defaultWorkspace")
-        let openSelector = NSSelectorFromString("openApplicationWithBundleID:")
-        guard let type = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type,
-              type.responds(to: selector),
-              let workspace = type.perform(selector)?.takeUnretainedValue() as? NSObject,
-              workspace.responds(to: openSelector),
-              let implementation = workspace.method(for: openSelector)
-        else { return false }
-        let call = unsafeBitCast(implementation, to: (@convention(c) (AnyObject, Selector, NSString) -> Bool).self)
-        return call(workspace, openSelector, identifier as NSString)
-    }
-
     func resetProgress() { lastProgress = nil }
     func read(_ identifier: String) -> (record: InstalledAppRecord?, progress: InstallProgressReading?) {
         let progress = readProgress(identifier)

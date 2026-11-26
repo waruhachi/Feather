@@ -92,14 +92,17 @@ enum FR {
 		let handler = SigningHandler(app: app, options: options)
 		handler.appCertificate = certificate
 		handler.appIcon = icon
+		let activity = await WorkLiveActivity.begin(.signing, name: app.name ?? .localized("Unknown"))
 
 		do {
 			try await handler.copy()
 			try await handler.modify()
 			try? await handler.clean()
 			await ActivityLog.shared.record(.init(action: .localized("Signing"), app: app.name ?? .localized("Unknown"), outcome: .localized("Completed")))
+			await WorkLiveActivity.finish(activity, outcome: .signed)
 			return handler.uuid
 		} catch {
+			await WorkLiveActivity.finish(activity, outcome: error is CancellationError ? .cancelled : .failed)
 			try? await handler.clean()
 			await ActivityLog.shared.record(.init(action: .localized("Signing"), app: app.name ?? .localized("Unknown"), outcome: error.localizedDescription))
 			throw error

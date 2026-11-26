@@ -1,3 +1,50 @@
+import Foundation
+
+@MainActor
+enum WorkLiveActivity {
+	enum Phase {
+		case signing, installing
+	}
+
+	enum Outcome {
+		case signed, installed, unconfirmed, failed, cancelled
+	}
+
+	static func begin(_ phase: Phase, name: String) -> UUID {
+		let id = UUID()
+		#if os(iOS) && !targetEnvironment(macCatalyst)
+		if #available(iOS 16.2, *) {
+			DownloadLiveActivity.shared.begin(id, phase: phase == .signing ? .signing : .installing, name: name)
+		}
+		#endif
+		return id
+	}
+
+	static func update(_ id: UUID, progress: Double) {
+		#if os(iOS) && !targetEnvironment(macCatalyst)
+		if #available(iOS 16.2, *), progress.isFinite {
+			DownloadLiveActivity.shared.update(id, progress: min(1, max(0, progress)))
+		}
+		#endif
+	}
+
+	static func finish(_ id: UUID, outcome: Outcome) {
+		#if os(iOS) && !targetEnvironment(macCatalyst)
+		if #available(iOS 16.2, *) {
+			let phase: FeatherDownloadAttributes.ContentState.Phase
+			switch outcome {
+			case .signed: phase = .signed
+			case .installed: phase = .installed
+			case .unconfirmed: phase = .installationUnconfirmed
+			case .failed: phase = .workFailed
+			case .cancelled: phase = .cancelled
+			}
+			DownloadLiveActivity.shared.finish(id, phase: phase)
+		}
+		#endif
+	}
+}
+
 #if os(iOS) && !targetEnvironment(macCatalyst)
 import ActivityKit
 import UIKit
@@ -47,7 +94,7 @@ extension DownloadManager {
 		}
 
 		Task { @MainActor in
-			DownloadLiveActivity.shared.set(state, hasActiveDownloads: !active.isEmpty)
+			DownloadLiveActivity.shared.setDownload(state, active: !active.isEmpty)
 		}
 	}
 }
@@ -63,8 +110,36 @@ private final class DownloadLiveActivity {
 	private var refreshTask: Task<Void, Never>?
 	private var dismissed = false
 
-	func set(_ state: State?, hasActiveDownloads: Bool) {
-		pending = (state, hasActiveDownloads)
+	private var downloads: State?
+	private var work: [(UUID, State)] = []
+
+	func setDownload(_ state: State?, active: Bool) {
+		downloads = active ? state : nil
+		refresh(final: active ? nil : state)
+	}
+
+	func begin(_ id: UUID, phase: State.Phase, name: String) {
+		work.append((id, State(name: String(name.prefix(120)), count: 1, phase: phase, progress: nil)))
+		refresh()
+	}
+
+	func update(_ id: UUID, progress: Double) {
+		guard let index = work.firstIndex(where: { $0.0 == id }) else { return }
+		let state = work[index].1
+		work[index].1 = State(name: state.name, count: state.count, phase: state.phase, progress: progress)
+		if index == work.count - 1 { refresh() }
+	}
+
+	func finish(_ id: UUID, phase: State.Phase) {
+		guard let index = work.firstIndex(where: { $0.0 == id }) else { return }
+		let state = work.remove(at: index).1
+		let complete = phase == .signed || phase == .installed
+		refresh(final: State(name: state.name, count: 1, phase: phase, progress: complete ? 1 : nil))
+	}
+
+	private func refresh(final: State? = nil) {
+		let active = work.last?.1 ?? downloads
+		pending = (active ?? final, active != nil)
 		guard refreshTask == nil else { return }
 		refreshTask = Task {
 			defer { refreshTask = nil }
@@ -96,6 +171,7 @@ private final class DownloadLiveActivity {
 		let content = ActivityContent(state: state, staleDate: now.addingTimeInterval(5 * 60))
 		if let activity {
 			if activity.content.state.phase != state.phase
+				|| activity.content.state.name != state.name
 				|| activity.content.state.count != state.count
 				|| now.timeIntervalSince(lastUpdate ?? .distantPast) >= 1
 			{

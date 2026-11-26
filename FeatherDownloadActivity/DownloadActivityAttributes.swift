@@ -13,6 +13,12 @@ struct FeatherDownloadAttributes: ActivityAttributes {
 			case finished
 			case failed
 			case cancelled
+			case signing
+			case installing
+			case signed
+			case installed
+			case installationUnconfirmed
+			case workFailed
 		}
 
 		let name: String
