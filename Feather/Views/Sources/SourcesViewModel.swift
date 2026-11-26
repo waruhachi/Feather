@@ -17,7 +17,7 @@ final class SourcesViewModel: ObservableObject {
 	
 	private let _cacheDirectory = URL.cachesDirectory.appendingPathComponent("FeatherSources", isDirectory: true)
 
-	var isFinished = true
+	@Published private(set) var isFinished = true
 	@Published var sources: [AltSource: ASRepository] = [:]
 	
 	func fetchSources(_ sources: FetchedResults<AltSource>, refresh: Bool = false, batchSize: Int = 4) async {

@@ -58,9 +58,8 @@ struct SourceAppsDetailView: View {
 						
 						Spacer()
 						
-						DownloadButtonView(sourceURL: sourceURL, source: source, app: app)
+						SourceAppInstallControls(sourceURL: sourceURL, source: source, app: app)
 					}
-					.lineLimit(2)
 					.frame(maxWidth: .infinity, alignment: .leading)
 				}
 				

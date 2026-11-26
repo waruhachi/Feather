@@ -29,6 +29,7 @@ struct InstallPreviewView: View {
 	
 	var app: AppInfoPresentable
 	var onOutcome: ((String) -> Void)?
+	var onVerifiedInstall: (() -> Void)?
 	var onTransferStarted: (() -> Void)?
 	var protectedCopies: () -> Set<String>
 	@StateObject var viewModel: InstallerStatusViewModel
@@ -37,8 +38,9 @@ struct InstallPreviewView: View {
 	@State var isSharing: Bool
 	
 	init(app: AppInfoPresentable, isSharing: Bool = false, onOutcome: ((String) -> Void)? = nil,
-		 onTransferStarted: (() -> Void)? = nil, protectedCopies: @escaping () -> Set<String> = { [] }) {
+		 onVerifiedInstall: (() -> Void)? = nil, onTransferStarted: (() -> Void)? = nil, protectedCopies: @escaping () -> Set<String> = { [] }) {
 		self.onOutcome = onOutcome
+		self.onVerifiedInstall = onVerifiedInstall
 		self.onTransferStarted = onTransferStarted
 		self.protectedCopies = protectedCopies
 		self.app = app
@@ -95,6 +97,7 @@ struct InstallPreviewView: View {
 			case .completed(.success):
 				let verified = _installationMethod == 1 || verifiedOTA
 				if verified {
+					onVerifiedInstall?()
 					Storage.shared.finishInstall(app, protecting: protectedCopies())
 				}
 				finish(.localized(verified ? "Installed" : "Finished. Check Home Screen."), completed: true)

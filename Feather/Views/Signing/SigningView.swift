@@ -40,9 +40,11 @@ struct SigningView: View {
 	}
 	
 	var app: AppInfoPresentable
+	var onSigned: ((String) -> Void)?
 	
-	init(app: AppInfoPresentable) {
+	init(app: AppInfoPresentable, onSigned: ((String) -> Void)? = nil) {
 		self.app = app
+		self.onSigned = onSigned
 		let storedCert = UserDefaults.standard.integer(forKey: "feather.selectedCert")
 		__temporaryCertificate = State(initialValue: storedCert)
 	}
@@ -71,7 +73,7 @@ struct SigningView: View {
 							Button {
 								_start()
 							} label: {
-								NBSheetButton(title: .localized("Start Signing"), style: .prominent)
+								NBSheetButton(title: .localized(_isSigning ? "Signing" : "Start Signing"), style: .prominent)
 									.padding()
 							}
 							.buttonStyle(.plain)
@@ -438,7 +440,9 @@ extension SigningView {
 			Storage.shared.deleteApp(for: app)
 		}
 		dismiss()
-		if _temporaryOptions.post_installAppAfterSigned {
+		if let onSigned {
+			onSigned(uuid)
+		} else if _temporaryOptions.post_installAppAfterSigned {
 			NotificationCenter.default.post(name: .featherInstallApp, object: uuid)
 		}
 	}
