@@ -107,6 +107,8 @@ struct Options: Codable, Equatable {
 	var appIdentifier: String?
 	/// App entitlements
 	var appEntitlementsFile: URL?
+	/// Per-signing-session replacement dictionary; the existing signing options apply afterward.
+	var appInfoPlist: Data?
 	/// App apparence (i.e. Light/Dark/Default)
 	var appAppearance: AppAppearance
 	/// App minimum iOS requirement (i.e. iOS 11.0)
@@ -132,6 +134,7 @@ struct Options: Codable, Equatable {
 	var displayNames: [String: String]
 	/// Array of files (`.dylib`, `.deb`, `.framework`) to extract and inject
 	var injectionFiles: [URL]
+	var tweakInjectionRules: [String: TweakInjectionRule]?
 	/// Legacy framework queue, migrated into `injectionFiles`
 	var injectionFrameworks: [URL]
 	/// Array of `.appex` bundles to inject into `PlugIns/`

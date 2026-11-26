@@ -17,6 +17,39 @@ struct CertificatesView: View {
 	@State private var _isSelectedInfoPresenting: CertificatePair?
 	@State private var _certToRename: CertificatePair?
 	@State private var _newNickname: String = ""
+	@State private var search = ""
+	@AppStorage("Feather.certificateSort") private var sort = CertificateSort.newest
+	@AppStorage("Feather.pinnedCertificate") private var pinnedCertificate = ""
+
+	private enum CertificateSort: String, CaseIterable {
+		case newest = "Newest"
+		case name = "Name"
+		case expiration = "Expiration"
+	}
+
+	private var visibleCertificates: [(offset: Int, element: CertificatePair)] {
+		let candidates = _certificates.enumerated().map { index, cert in
+			let profile = Storage.shared.getProvisionFileDecoded(for: cert)
+			return (index, cert, cert.nickname ?? profile?.Name ?? "", profile?.TeamName ?? "", profile?.ExpirationDate)
+		}.filter { item in
+			search.isEmpty || item.2.localizedCaseInsensitiveContains(search) || item.3.localizedCaseInsensitiveContains(search)
+		}
+		return candidates.sorted { lhs, rhs in
+			let lhsPinned = lhs.1.uuid == pinnedCertificate
+			let rhsPinned = rhs.1.uuid == pinnedCertificate
+			if lhsPinned != rhsPinned { return lhsPinned }
+			switch sort {
+			case .newest: return lhs.0 < rhs.0
+			case .name:
+				let order = lhs.2.localizedStandardCompare(rhs.2)
+				return order == .orderedSame ? lhs.0 < rhs.0 : order == .orderedAscending
+			case .expiration:
+				let left = lhs.4 ?? .distantFuture
+				let right = rhs.4 ?? .distantFuture
+				return left == right ? lhs.0 < rhs.0 : left < right
+			}
+		}.map { ($0.0, $0.1) }
+	}
 
 	// MARK: Fetch
 	@FetchRequest(
@@ -38,11 +71,12 @@ struct CertificatesView: View {
 	// MARK: Body
 	var body: some View {
 		NBGrid {
-			ForEach(Array(_certificates.enumerated()), id: \.element.uuid) { index, cert in
+			ForEach(visibleCertificates, id: \.element.objectID) { index, cert in
 				_cellButton(for: cert, at: index)
 			}
 		}
 		.navigationTitle(.localized("Certificates"))
+		.searchable(text: $search, prompt: Text(.localized("Search certificates")))
 		.overlay {
 			if _certificates.isEmpty {
 				if #available(iOS 17, *) {
@@ -61,6 +95,17 @@ struct CertificatesView: View {
 			}
 		}
 		.toolbar {
+			ToolbarItem(placement: .topBarTrailing) {
+				Menu {
+					Picker(.localized("Sort"), selection: $sort) {
+						ForEach(CertificateSort.allCases, id: \.self) { choice in
+							Text(.localized(choice.rawValue)).tag(choice)
+						}
+					}
+				} label: {
+					Label(.localized("Sort"), systemImage: "arrow.up.arrow.down")
+				}
+			}
 			if _bindingSelectedCert == nil {
 				NBToolbarButton(
 					systemImage: "plus",
@@ -149,6 +194,11 @@ extension CertificatesView {
 			_newNickname = cert.nickname ?? ""
 			_certToRename = cert
 			_isRenamingPresenting = true
+		}
+		if let uuid = cert.uuid {
+			Button(.localized(pinnedCertificate == uuid ? "Unpin" : "Move to Top"), systemImage: "arrow.up.to.line") {
+				pinnedCertificate = pinnedCertificate == uuid ? "" : uuid
+			}
 		}
 		Divider()
 		Button(.localized("Check Revokage"), systemImage: "person.text.rectangle") {

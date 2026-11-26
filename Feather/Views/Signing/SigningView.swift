@@ -5,6 +5,7 @@
 //  Created by samara on 14.04.2025.
 //
 
+import CoreData
 import SwiftUI
 import PhotosUI
 import NimbleViews
@@ -21,6 +22,9 @@ struct SigningView: View {
 	@State private var _isImagePickerPresenting = false
 	@State private var _isSigning = false
 	@State private var _selectedPhoto: PhotosPickerItem? = nil
+	@State private var _rememberRecipe = false
+	@State private var _loadedSettings = false
+	@State private var _recipeIdentifier: String?
 	@State var appIcon: UIImage?
 	
 	// MARK: Fetch
@@ -92,6 +96,7 @@ struct SigningView: View {
 				) {
 					_temporaryOptions = OptionsManager.shared.options
 					appIcon = nil
+					_rememberRecipe = false
 				}
 			}
 			.sheet(isPresented: $_isAltPickerPresenting) { SigningAlternativeIconView(app: app, appIcon: $appIcon, isModifing: .constant(true)) }
@@ -120,6 +125,8 @@ struct SigningView: View {
 			.animation(.smooth, value: _isSigning)
 		}
 		.onAppear {
+			guard !_loadedSettings else { return }
+			_loadedSettings = true
 			// ppq protection
 			if
 				_optionsManager.options.ppqProtection,
@@ -143,6 +150,8 @@ struct SigningView: View {
 			{
 				_temporaryOptions.appName = newName
 			}
+
+			_loadRecipe()
 		}
 	}
 }
@@ -201,9 +210,30 @@ extension SigningView {
 					)
 				}
 			} else {
-				Text(.localized("No Certificate"))
-					.font(.footnote)
-					.foregroundColor(.disabled())
+				NavigationLink(.localized("Select Certificate")) {
+					CertificatesView(selectedCert: $_temporaryCertificate)
+				}
+			}
+			if app.identifier != nil && _temporaryOptions.signingOption == .default {
+				let title: String = _recipeIdentifier == nil ? .localized("Remember for This App") : .localized("Save Changes for This App")
+				Toggle(title, isOn: $_rememberRecipe)
+			}
+			if let identifier = _recipeIdentifier {
+				Button(.localized("Forget Saved Signing Settings"), role: .destructive) {
+					do {
+						try SigningRecipe.remove(for: identifier)
+						if let original = app.identifier, SigningRecipe.lastTarget(for: original) == identifier {
+							SigningRecipe.setLastTarget(nil, for: original)
+						}
+						_recipeIdentifier = nil
+						_rememberRecipe = false
+						_temporaryOptions = _optionsManager.options
+						_temporaryCertificate = UserDefaults.standard.integer(forKey: "feather.selectedCert")
+						appIcon = nil
+					} catch {
+						UIAlertController.showAlertWithOk(title: .localized("Error"), message: error.localizedDescription)
+					}
+				}
 			}
 		}
 	}
@@ -234,7 +264,25 @@ extension SigningView {
 				}
 				NavigationLink(.localized("Entitlements") + " (BETA)") {
 					SigningEntitlementsView(
+						executable: Storage.shared.getAppDirectory(for: app).flatMap { Bundle(url: $0)?.executableURL },
 						bindingValue: $_temporaryOptions.appEntitlementsFile
+					)
+				}
+				NavigationLink(.localized("Edit Info.plist")) {
+					SigningPlistEditor(
+						title: .localized("Info.plist"),
+						read: {
+							if let edited = _temporaryOptions.appInfoPlist {
+								return try SigningPlistEditor.dictionary(from: edited)
+							}
+							guard let directory = Storage.shared.getAppDirectory(for: app) else {
+								throw SigningFileHandlerError.appNotFound
+							}
+							return try SigningPlistEditor.dictionary(from: Data(contentsOf: directory.appendingPathComponent("Info.plist")))
+						},
+						save: { dictionary in
+							_temporaryOptions.appInfoPlist = try SigningPlistEditor.encode(dictionary)
+						}
 					)
 				}
 				NavigationLink(.localized("Tweaks")) {
@@ -268,18 +316,58 @@ extension SigningView {
 
 // MARK: - Extension: View (import)
 extension SigningView {
+	private func _loadRecipe() {
+		guard let identifier = app.identifier else { return }
+		let target = app.isSigned ? identifier : SigningRecipe.lastTarget(for: identifier)
+			?? SigningPreflight.bundleIdentifier(for: app, options: _temporaryOptions) ?? identifier
+		do {
+			let current = try SigningRecipe.load(for: target)
+			let recipe = try current ?? (target != identifier ? SigningRecipe.load(for: identifier) : nil)
+			guard let recipe else { return }
+			_recipeIdentifier = current == nil ? identifier : target
+			_rememberRecipe = true
+			_temporaryOptions = recipe.options(using: _optionsManager.options)
+			appIcon = recipe.icon
+			if let pinned = recipe.certificateID {
+				_temporaryCertificate = certificates.firstIndex { $0.uuid == pinned } ?? -1
+			}
+		} catch {
+			_recipeIdentifier = target
+			UIAlertController.showAlertWithOk(title: .localized("Could Not Load Saved Signing Settings"), message: error.localizedDescription)
+		}
+	}
+
 	private func _start() {
 		guard
 			_selectedCert() != nil || _temporaryOptions.signingOption != .default
 		else {
 			UIAlertController.showAlertWithOk(
 				title: .localized("No Certificate"),
-				message: .localized("Please go to settings and import a valid certificate"),
+				message: _temporaryCertificate == -1
+					? SigningPreflight.savedCertificateUnavailable.localizedDescription
+					: .localized("Please go to settings and import a valid certificate"),
 				isCancel: true
 			)
 			return
 		}
 
+		if _temporaryOptions.signingOption == .default,
+			let minimum = SigningPreflight.requiredSystemVersion(for: app, options: _temporaryOptions)
+		{
+			let proceed = UIAlertAction(title: .localized("Continue Signing"), style: .default) { _ in
+				_confirmExtensionReplacements()
+			}
+			UIAlertController.showAlert(
+				title: .localized("Newer iOS Required"),
+				message: SigningPreflight.newerSystemRequired(minimum).localizedDescription,
+				actions: [UIAlertAction(title: .localized("Cancel"), style: .cancel), proceed]
+			)
+			return
+		}
+		_confirmExtensionReplacements()
+	}
+
+	private func _confirmExtensionReplacements() {
 		if _temporaryOptions.injectedAppExtensions.isEmpty {
 			_beginSigning()
 			return
@@ -313,41 +401,45 @@ extension SigningView {
 	}
 
 	private func _beginSigning() {
-		let generator = UIImpactFeedbackGenerator(style: .light)
-		generator.impactOccurred()
+		FeatherHaptics.action()
 		_isSigning = true
 
-		FR.signPackageFile(
-			app,
-			using: _temporaryOptions,
-			icon: appIcon,
-			certificate: _selectedCert()
-		) { error in
-			if let error {
-				let ok = UIAlertAction(title: .localized("Dismiss"), style: .cancel) { _ in
-					dismiss()
-				}
-
-				UIAlertController.showAlert(
-					title: "Error",
-					message: error.localizedDescription,
-					actions: [ok]
-				)
-			} else {
-				if
-					_temporaryOptions.post_deleteAppAfterSigned,
-					!app.isSigned
+		Task { @MainActor in
+			defer { _isSigning = false }
+			do {
+				let certificate = _selectedCert()
+				let signedUUID = try await FR.signPackage(app, using: _temporaryOptions, icon: appIcon, certificate: certificate)
+				if _rememberRecipe, _temporaryOptions.signingOption == .default,
+					let target = SigningPreflight.bundleIdentifier(for: app, options: _temporaryOptions)
 				{
-					Storage.shared.deleteApp(for: app)
-				}
-
-				if _temporaryOptions.post_installAppAfterSigned {
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-						NotificationCenter.default.post(name: Notification.Name("Feather.installApp"), object: nil)
+					do {
+						try SigningRecipe.save(for: target, options: _temporaryOptions, certificate: certificate, icon: appIcon)
+						if !app.isSigned, let original = app.identifier {
+							SigningRecipe.setLastTarget(target, for: original)
+						}
+					} catch {
+						UIAlertController.showAlertWithOk(
+							title: .localized("App Signed, but Settings Could Not Be Saved"),
+							message: error.localizedDescription
+						) { _finishSigning(signedUUID) }
+						return
 					}
 				}
-				dismiss()
+				_finishSigning(signedUUID)
+			} catch {
+				FeatherHaptics.result(.error)
+				UIAlertController.showAlertWithOk(title: .localized("Error"), message: error.localizedDescription)
 			}
+		}
+	}
+
+	private func _finishSigning(_ uuid: String) {
+		if _temporaryOptions.post_deleteAppAfterSigned, !app.isSigned {
+			Storage.shared.deleteApp(for: app)
+		}
+		dismiss()
+		if _temporaryOptions.post_installAppAfterSigned {
+			NotificationCenter.default.post(name: .featherInstallApp, object: uuid)
 		}
 	}
 

@@ -11,6 +11,7 @@ import SwiftUI
 // MARK: - View
 struct SigningTweaksView: View {
 	@State private var _isAddingPresenting = false
+	@State private var _libraryPresenting = false
 
 	@Binding var options: Options
 
@@ -39,6 +40,10 @@ struct SigningTweaksView: View {
 				}
 			}
 
+			Button(.localized("Choose from Tweak Manager"), systemImage: "shippingbox") {
+				_libraryPresenting = true
+			}
+
 			NBSection(.localized("Tweaks")) {
 				if !options.injectionFiles.isEmpty {
 					ForEach(options.injectionFiles, id: \.absoluteString) {
@@ -59,6 +64,26 @@ struct SigningTweaksView: View {
 				placement: .topBarTrailing
 			) {
 				_isAddingPresenting = true
+			}
+		}
+		.sheet(isPresented: $_libraryPresenting) {
+			NBNavigationView(.localized("Tweak Manager"), displayMode: .inline) {
+				TweakLibraryView { files in
+					for url in files {
+						let isExtension = url.pathExtension.lowercased() == "appex"
+						FileManager.default.moveAndStore(url, with: isExtension ? "FeatherExtension" : "FeatherTweak") { copy in
+							guard FileManager.default.fileExists(atPath: copy.path) else { return }
+							if isExtension {
+								options.injectedAppExtensions.append(copy)
+							} else {
+								options.injectionFiles.append(copy)
+								if options.tweakInjectionRules == nil { options.tweakInjectionRules = [:] }
+								options.tweakInjectionRules?[copy.absoluteString] = TweakLibrary.metadata(for: url).injection
+							}
+						}
+					}
+					_libraryPresenting = false
+				}
 			}
 		}
 		.sheet(isPresented: $_isAddingPresenting) {
@@ -92,10 +117,20 @@ struct SigningTweaksView: View {
 extension SigningTweaksView {
 	@ViewBuilder
 	private func _file(tweak: URL) -> some View {
-		Label(
-			tweak.lastPathComponent,
-			systemImage: _fileSystemImage(for: tweak)
-		)
+		NavigationLink {
+			Form {
+				TweakInjectionRuleFields(rule: Binding(
+					get: { options.tweakInjectionRules?[tweak.absoluteString] ?? TweakInjectionRule() },
+					set: { rule in
+						if options.tweakInjectionRules == nil { options.tweakInjectionRules = [:] }
+						options.tweakInjectionRules?[tweak.absoluteString] = rule
+					}
+				))
+			}
+			.navigationTitle(tweak.lastPathComponent)
+		} label: {
+			Label(tweak.lastPathComponent, systemImage: _fileSystemImage(for: tweak))
+		}
 		.lineLimit(2)
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -109,16 +144,19 @@ extension SigningTweaksView {
 	@ViewBuilder
 	private func _fileActions(tweak: URL) -> some View {
 		Button(role: .destructive) {
-			FileManager.default.deleteStored(tweak) { url in
-				if let index = options.injectionFiles.firstIndex(where: {
-					$0 == url
-				}) {
-					options.injectionFiles.remove(at: index)
-				}
+			if SigningRecipe.owns(tweak) {
+				removeFromSigningOptions(tweak)
+			} else {
+				FileManager.default.deleteStored(tweak, completion: removeFromSigningOptions)
 			}
 		} label: {
-			Label(.localized("Delete"), systemImage: "trash")
+			Label(SigningRecipe.owns(tweak) ? .localized("Remove from Signing") : .localized("Delete"), systemImage: "trash")
 		}
+	}
+
+	private func removeFromSigningOptions(_ url: URL) {
+		options.injectionFiles.removeAll { $0 == url }
+		options.tweakInjectionRules?.removeValue(forKey: url.absoluteString)
 	}
 
 	private func _fileSystemImage(for url: URL) -> String {

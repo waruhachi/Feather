@@ -52,6 +52,7 @@ final class CertificateFileHandler: NSObject {
 		try _fileManager.copyItem(at: _provision, to: destinationURL.appendingPathComponent(_provision.lastPathComponent))
 	}
 	
+	@MainActor
 	func addToDatabase() async throws {
 		
 		Storage.shared.addCertificate(

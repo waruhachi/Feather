@@ -9,7 +9,7 @@ import AltSourceKit
 import CoreData
 import Foundation
 
-enum IPAOriginKind: String {
+enum IPAOriginKind: String, Codable {
 	case featherSource
 	case localFile
 	case remoteURL
@@ -24,7 +24,7 @@ enum UpdateProviderKind: String {
 	case none
 }
 
-struct IPAImportOrigin: Equatable {
+struct IPAImportOrigin: Equatable, Codable {
 	let kind: IPAOriginKind
 	let url: URL?
 
@@ -40,7 +40,7 @@ struct IPAImportOrigin: Equatable {
 	}
 }
 
-struct SourceAppProvenance: Equatable {
+struct SourceAppProvenance: Equatable, Codable {
 	let sourceRepositoryURL: URL
 	let sourceRepositoryIdentifier: String?
 	let sourceRepositoryName: String?
@@ -95,6 +95,45 @@ extension SourceAppProvenance {
 }
 
 extension Storage {
+	private enum RepositoryChoice: String {
+		case pinned = "Feather.pinnedUpdateSources"
+		case inherited = "Feather.inheritedUpdateSources"
+	}
+
+	func pinnedUpdateSource(for appUUID: String) -> URL? {
+		repositoryChoice(.pinned, for: appUUID)
+	}
+
+	func setPinnedUpdateSource(_ url: URL?, for appUUID: String) {
+		setRepositoryChoice(url, as: .pinned, for: appUUID)
+	}
+
+	func inheritedUpdateSource(for appUUID: String) -> URL? {
+		repositoryChoice(.inherited, for: appUUID)
+	}
+
+	func inheritUpdateSource(from sourceUUID: String, to destinationUUID: String) {
+		if let pinned = pinnedUpdateSource(for: sourceUUID) {
+			setPinnedUpdateSource(pinned, for: destinationUUID)
+		}
+		let original = inheritedUpdateSource(for: sourceUUID)
+			?? sourceMetadata(for: sourceUUID)?.sourceRepositoryURL
+		if let original, original != sourceMetadata(for: destinationUUID)?.sourceRepositoryURL {
+			setRepositoryChoice(original, as: .inherited, for: destinationUUID)
+		}
+	}
+
+	private func repositoryChoice(_ choice: RepositoryChoice, for appUUID: String) -> URL? {
+		let values = UserDefaults.standard.dictionary(forKey: choice.rawValue)
+		return (values?[appUUID] as? String).flatMap { URL(string: $0) }
+	}
+
+	private func setRepositoryChoice(_ url: URL?, as choice: RepositoryChoice, for appUUID: String) {
+		var values = UserDefaults.standard.dictionary(forKey: choice.rawValue) ?? [:]
+		values[appUUID] = url?.absoluteString
+		UserDefaults.standard.set(values, forKey: choice.rawValue)
+	}
+
 	func sourceMetadata(for appUUID: String) -> AppSourceMetadata? {
 		let request: NSFetchRequest<AppSourceMetadata> =
 			AppSourceMetadata.fetchRequest()
@@ -142,7 +181,8 @@ extension Storage {
 	func addSourceMetadata(
 		for appUUID: String,
 		kind: SourceLinkedAppKind,
-		provenance: SourceAppProvenance
+		provenance: SourceAppProvenance,
+		deferSave: Bool = false
 	) {
 		let metadata =
 			sourceMetadata(for: appUUID) ?? AppSourceMetadata(context: context)
@@ -174,7 +214,7 @@ extension Storage {
 		metadata.updatesDisabled = false
 		metadata.updatedAt = now
 
-		saveContext()
+		if !deferSave { saveContext() }
 	}
 
 	func addImportMetadata(
@@ -183,7 +223,8 @@ extension Storage {
 		origin: IPAImportOrigin,
 		appIdentifier: String?,
 		appName: String?,
-		appVersion: String?
+		appVersion: String?,
+		deferSave: Bool = false
 	) {
 		let metadata =
 			sourceMetadata(for: appUUID) ?? AppSourceMetadata(context: context)
@@ -217,13 +258,14 @@ extension Storage {
 		metadata.updatesDisabled = false
 		metadata.updatedAt = now
 
-		saveContext()
+		if !deferSave { saveContext() }
 	}
 
 	func copySourceMetadata(
 		from sourceAppUUID: String?,
 		to destinationAppUUID: String,
-		kind: SourceLinkedAppKind
+		kind: SourceLinkedAppKind,
+		deferSave: Bool = false
 	) {
 		guard
 			let sourceAppUUID
@@ -264,13 +306,19 @@ extension Storage {
 		metadata.skippedUpdateVersionID = source.skippedUpdateVersionID
 		metadata.updatedAt = now
 
-		saveContext()
+		if !deferSave {
+			saveContext()
+			inheritUpdateSource(from: sourceAppUUID, to: destinationAppUUID)
+		}
 	}
 
 	func deleteSourceMetadata(for appUUID: String?) {
 		guard let appUUID else {
 			return
 		}
+
+		setPinnedUpdateSource(nil, for: appUUID)
+		setRepositoryChoice(nil, as: .inherited, for: appUUID)
 
 		let request: NSFetchRequest<AppSourceMetadata> =
 			AppSourceMetadata.fetchRequest()

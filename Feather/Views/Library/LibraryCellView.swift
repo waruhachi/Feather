@@ -31,6 +31,7 @@ struct LibraryCellView: View {
 	@Binding var selectedSigningAppPresenting: AnyApp?
 	@Binding var selectedInstallAppPresenting: AnyApp?
 	@Binding var selectedAppUUIDs: Set<String>
+	var onChooseUpdate: () -> Void
 
 	// MARK: Selections
 	private var _isSelected: Bool {
@@ -107,6 +108,9 @@ struct LibraryCellView: View {
 				if _hasUpdateContextActions(for: app) {
 					Divider()
 					_contextUpdateActions(for: app)
+					if updateManager.update(for: app)?.providerKind == .featherSource {
+						Button(.localized("Choose Update Source"), systemImage: "list.bullet", action: onChooseUpdate)
+					}
 				}
 				Divider()
 				_contextAppActions(for: app)
@@ -328,7 +332,8 @@ extension LibraryCellView {
 			id: "FeatherManualDownload_Update_\(update.localUUID)",
 			sourceProvenance: update.sourceProvenance,
 			importOrigin: update.sourceProvenance == nil
-				? .remoteURL(downloadURL) : nil
+				? .remoteURL(update.sourceURL ?? downloadURL) : nil,
+			updateFromUUID: update.localUUID
 		)
 	}
 

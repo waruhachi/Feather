@@ -18,16 +18,16 @@ jobs:
       - name: Prepare dependencies (Xcode)
         run: |
           sudo xcode-select -s /Applications/Xcode_26.3.0.app
+          rustup target add --toolchain stable aarch64-apple-ios
 
       - name: Build
         run: | 
-          agvtool new-version -all $(git rev-parse HEAD)
-          make
+          make FEATHER_BUILD_NUMBER="$GITHUB_RUN_NUMBER"
 
       - name: Get Version
         id: get_version
         run: |
-          unzip -p upload/Feather.ipa Payload/Feather.app/Info.plist > /tmp/Feather-Info.plist
+          unzip -p packages/Feather.ipa Payload/Feather.app/Info.plist > /tmp/Feather-Info.plist
           VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /tmp/Feather-Info.plist)
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 

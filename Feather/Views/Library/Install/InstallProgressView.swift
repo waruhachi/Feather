@@ -13,6 +13,12 @@ struct InstallProgressView: View {
 	
 	var app: AppInfoPresentable
 	@ObservedObject var viewModel: InstallerStatusViewModel
+	var otaPayload: OTAPayloadProgress.Snapshot?
+
+	private var overallProgress: Double {
+		if viewModel.isIDevice { return viewModel.overallProgress }
+		return (viewModel.packageProgress + (otaPayload?.fraction ?? 0) + viewModel.installProgress) / 3
+	}
 	
 	var body: some View {
 		VStack(spacing: 12) {
@@ -22,6 +28,13 @@ struct InstallProgressView: View {
 				.onAppear {
 					_isPulsing = true
 				}
+			if case .sendingPayload = viewModel.status, let otaPayload {
+				let sent = ByteCountFormatter.string(fromByteCount: Int64(otaPayload.sent), countStyle: .file)
+				let total = ByteCountFormatter.string(fromByteCount: Int64(otaPayload.total), countStyle: .file)
+				Text(String.localized("%@ of %@", arguments: sent, total))
+					.font(.caption.monospacedDigit())
+					.foregroundStyle(.secondary)
+			}
 		}
 	}
 	
@@ -38,12 +51,12 @@ struct InstallProgressView: View {
 				.mask(
 					ZStack {
 						Circle().strokeBorder(Color.white, lineWidth: 4.5)
-						PieShape(progress: viewModel.overallProgress)
+						PieShape(progress: overallProgress)
 							.scaleEffect(viewModel.isCompleted ? 2.2 : 1)
 							.animation(.smooth, value: viewModel.isCompleted)
 					}
 				)
-				.animation(.smooth, value: viewModel.overallProgress)
+				.animation(.smooth, value: overallProgress)
 		}
 	}
 	

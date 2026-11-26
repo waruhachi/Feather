@@ -12,7 +12,7 @@ import OSLog
 
 final class SigningHandler: NSObject {
 	private let _fileManager = FileManager.default
-	private let _uuid = UUID().uuidString
+	let uuid = UUID().uuidString
 	private var _movedAppPath: URL?
 	// using uuid string is the best way to find the
 	// app we want to sign, it does not matter what
@@ -37,7 +37,7 @@ final class SigningHandler: NSObject {
 		self._options = options
 		self._uniqueWorkDir = _fileManager.temporaryDirectory
 			.appendingPathComponent(
-				"FeatherSigning_\(_uuid)",
+				"FeatherSigning_\(uuid)",
 				isDirectory: true
 			)
 		super.init()
@@ -46,6 +46,10 @@ final class SigningHandler: NSObject {
 	func copy() async throws {
 		guard let appUrl = Storage.shared.getAppDirectory(for: _app) else {
 			throw SigningFileHandlerError.appNotFound
+		}
+
+		if _options.signingOption == .default, let executable = Bundle(url: appUrl)?.executableURL {
+			try SigningPreflight.checkExecutable(at: executable)
 		}
 
 		try _fileManager.createDirectoryIfNeeded(at: _uniqueWorkDir)
@@ -57,7 +61,7 @@ final class SigningHandler: NSObject {
 		try _fileManager.copyItem(at: appUrl, to: movedAppURL)
 		_movedAppPath = movedAppURL
 		Logger.misc.info(
-			"[\(self._uuid)] Moved Payload to: \(movedAppURL.path)"
+			"[\(self.uuid)] Moved Payload to: \(movedAppURL.path)"
 		)
 	}
 
@@ -66,15 +70,24 @@ final class SigningHandler: NSObject {
 			throw SigningFileHandlerError.appNotFound
 		}
 
-		guard
-			let infoDictionary = NSDictionary(
-				contentsOf: movedAppPath.appendingPathComponent("Info.plist")
-			)!.mutableCopy() as? NSMutableDictionary
-		else {
+		let infoURL = movedAppPath.appendingPathComponent("Info.plist")
+		guard let original = NSDictionary(contentsOf: infoURL) else {
 			throw SigningFileHandlerError.infoPlistNotFound
 		}
 
-		let oldIdentifier = infoDictionary["CFBundleIdentifier"] as? String
+		let oldIdentifier = original["CFBundleIdentifier"] as? String
+		let infoDictionary: NSMutableDictionary
+		if let edited = _options.appInfoPlist {
+			guard let dictionary = try PropertyListSerialization.propertyList(from: edited, options: [], format: nil) as? [String: Any],
+				let executable = dictionary["CFBundleExecutable"] as? String,
+				executable == original["CFBundleExecutable"] as? String,
+				let identifier = dictionary["CFBundleIdentifier"] as? String,
+				!identifier.isEmpty
+			else { throw SigningFileHandlerError.infoPlistNotFound }
+			infoDictionary = NSMutableDictionary(dictionary: dictionary)
+		} else {
+			infoDictionary = NSMutableDictionary(dictionary: original as? [String: Any] ?? [:])
+		}
 
 		try await _modifyDict(
 			using: infoDictionary,
@@ -108,7 +121,7 @@ final class SigningHandler: NSObject {
 			try await _injectAppExtensions(for: movedAppPath, with: _options)
 		}
 
-		if let identifier = _options.appIdentifier,
+		if let identifier = infoDictionary["CFBundleIdentifier"] as? String,
 			let oldIdentifier,
 			oldIdentifier != identifier
 		{
@@ -163,12 +176,12 @@ final class SigningHandler: NSObject {
 			throw SigningFileHandlerError.missingCertifcate
 		}
 
-		try await self.move()
-		try await self.addToDatabase()
-
 		if let error = handler.hadError {
 			throw error
 		}
+
+		try await self.move()
+		try await self.addToDatabase()
 	}
 
 	func move() async throws {
@@ -185,47 +198,48 @@ final class SigningHandler: NSObject {
 		)
 
 		try _fileManager.moveItem(at: movedAppPath, to: destinationURL)
-		Logger.misc.info("[\(self._uuid)] Moved App to: \(destinationURL.path)")
+		Logger.misc.info("[\(self.uuid)] Moved App to: \(destinationURL.path)")
 
 		try? _fileManager.removeItem(at: _uniqueWorkDir)
 	}
 
+	@MainActor
 	func addToDatabase() async throws {
 		let app = try await _directory()
 
-		guard let appUrl = _fileManager.getPath(in: app, for: "app") else {
-			return
+		guard let appUrl = _fileManager.getPath(in: app, for: "app"),
+			let bundle = Bundle(url: appUrl), let identifier = bundle.bundleIdentifier
+		else {
+			try? _fileManager.removeItem(at: app)
+			throw SigningFileHandlerError.appNotFound
 		}
 
-		await withCheckedContinuation {
-			(continuation: CheckedContinuation<Void, Never>) in
-			let bundle = Bundle(url: appUrl)
-
-			Storage.shared.addSigned(
-				uuid: _uuid,
-				source: _app.source,
-				certificate: _options.signingOption != .default
-					? nil : appCertificate,
-				appName: bundle?.name,
-				appIdentifier: bundle?.bundleIdentifier,
-				appVersion: bundle?.version,
-				appIcon: bundle?.iconFileName
-			) { _ in
-				Logger.signing.info("[\(self._uuid)] Added to database")
-				continuation.resume()
+		let storage = Storage.shared
+		do {
+			try storage.saveNewApp {
+				storage.addSigned(
+					uuid: uuid,
+					source: _app.source,
+					certificate: _options.signingOption != .default ? nil : appCertificate,
+					appName: bundle.name ?? appUrl.deletingPathExtension().lastPathComponent,
+					appIdentifier: identifier,
+					appVersion: bundle.version ?? "",
+					appIcon: bundle.iconFileName
+				)
+				storage.copySourceMetadata(from: _app.uuid, to: uuid, kind: .signed, deferSave: true)
 			}
+			if let sourceUUID = _app.uuid {
+				storage.inheritUpdateSource(from: sourceUUID, to: uuid)
+			}
+		} catch {
+			try? _fileManager.removeItem(at: app)
+			throw error
 		}
-
-		Storage.shared.copySourceMetadata(
-			from: _app.uuid,
-			to: _uuid,
-			kind: .signed
-		)
 	}
 
 	private func _directory() async throws -> URL {
 		// Documents/Feather/Signed/\(UUID)
-		_fileManager.signed(_uuid)
+		_fileManager.signed(uuid)
 	}
 
 	func clean() async throws {

@@ -6,6 +6,7 @@
 //
 
 import AltSourceKit
+import CoreData
 import Foundation.NSURL
 import IDeviceSwift
 import NimbleJSON
@@ -23,29 +24,45 @@ enum FR {
 		importOrigin: IPAImportOrigin? = nil,
 		completion: @escaping (Error?) -> Void
 	) {
-		Task.detached {
-			let handler = AppFileHandler(
-				file: ipa,
-				download: download,
-				sourceProvenance: sourceProvenance,
-				importOrigin: importOrigin
-			)
-
+		Task {
 			do {
-				try await handler.copy()
-				try await handler.extract()
-				try await handler.move()
-				try await handler.addToDatabase()
-				try? await handler.clean()
-				await MainActor.run {
-					completion(nil)
-				}
+				_ = try await importPackage(ipa, download: download, sourceProvenance: sourceProvenance, importOrigin: importOrigin)
+				await MainActor.run { completion(nil) }
 			} catch {
-				try? await handler.clean()
-				await MainActor.run {
-					completion(error)
-				}
+				await MainActor.run { completion(error) }
 			}
+		}
+	}
+
+	static func importPackage(
+		_ ipa: URL,
+		download: Download? = nil,
+		sourceProvenance: SourceAppProvenance? = nil,
+		importOrigin: IPAImportOrigin? = nil
+	) async throws -> String {
+		let handler = AppFileHandler(file: ipa, download: download, sourceProvenance: sourceProvenance, importOrigin: importOrigin)
+		if download != nil {
+			let alreadyImported = await MainActor.run {
+				let request = Imported.fetchRequest()
+				request.predicate = NSPredicate(format: "uuid == %@", handler.uuid)
+				return ((try? Storage.shared.context.count(for: request)) ?? 0) > 0
+			}
+			if alreadyImported { return handler.uuid }
+		}
+		do {
+			try await handler.copy()
+			try Task.checkCancellation()
+			try await handler.extract()
+			try Task.checkCancellation()
+			try await handler.move()
+			try await handler.addToDatabase()
+			try? await handler.clean()
+			await ActivityLog.shared.record(.init(action: .localized("Import"), app: download?.fileName ?? ipa.lastPathComponent, outcome: .localized("Added to Library")))
+			return handler.uuid
+		} catch {
+			try? await handler.clean()
+			await ActivityLog.shared.record(.init(action: .localized("Import"), app: download?.fileName ?? ipa.lastPathComponent, outcome: error is CancellationError ? .localized("Cancelled") : .localized("Failed")))
+			throw error
 		}
 	}
 
@@ -56,24 +73,36 @@ enum FR {
 		certificate: CertificatePair?,
 		completion: @escaping (Error?) -> Void
 	) {
-		Task.detached {
-			let handler = SigningHandler(app: app, options: options)
-			handler.appCertificate = certificate
-			handler.appIcon = icon
-
+		Task {
 			do {
-				try await handler.copy()
-				try await handler.modify()
-				try? await handler.clean()
-				await MainActor.run {
-					completion(nil)
-				}
+				_ = try await signPackage(app, using: options, icon: icon, certificate: certificate)
+				await MainActor.run { completion(nil) }
 			} catch {
-				try? await handler.clean()
-				await MainActor.run {
-					completion(error)
-				}
+				await MainActor.run { completion(error) }
 			}
+		}
+	}
+
+	static func signPackage(
+		_ app: AppInfoPresentable,
+		using options: Options,
+		icon: UIImage? = nil,
+		certificate: CertificatePair?
+	) async throws -> String {
+		let handler = SigningHandler(app: app, options: options)
+		handler.appCertificate = certificate
+		handler.appIcon = icon
+
+		do {
+			try await handler.copy()
+			try await handler.modify()
+			try? await handler.clean()
+			await ActivityLog.shared.record(.init(action: .localized("Signing"), app: app.name ?? .localized("Unknown"), outcome: .localized("Completed")))
+			return handler.uuid
+		} catch {
+			try? await handler.clean()
+			await ActivityLog.shared.record(.init(action: .localized("Signing"), app: app.name ?? .localized("Unknown"), outcome: error.localizedDescription))
+			throw error
 		}
 	}
 
@@ -137,41 +166,6 @@ enum FR {
 		try? fileManager.copyItem(at: url, to: dest)
 
 		HeartbeatManager.shared.start(true)
-	}
-
-	static func downloadSSLCertificates(
-		from urlString: String,
-		completion: @escaping (Bool) -> Void
-	) {
-		let generator = UINotificationFeedbackGenerator()
-		generator.prepare()
-
-		NBFetchService().fetch(from: urlString) {
-			(result: Result<ServerView.ServerPackModel, Error>) in
-			switch result {
-			case .success(let pack):
-				do {
-					try FileManager.forceWrite(
-						content: pack.key,
-						to: "server.pem"
-					)
-					try FileManager.forceWrite(
-						content: pack.cert,
-						to: "server.crt"
-					)
-					try FileManager.forceWrite(
-						content: pack.info.domains.commonName,
-						to: "commonName.txt"
-					)
-					generator.notificationOccurred(.success)
-					completion(true)
-				} catch {
-					completion(false)
-				}
-			case .failure(_):
-				completion(false)
-			}
-		}
 	}
 
 	static func handleSource(

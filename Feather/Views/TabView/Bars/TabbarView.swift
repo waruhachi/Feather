@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct TabbarView: View {
-	@State private var selectedTab: TabEnum = .sources
+	@State private var selectedTab: TabEnum = UserDefaults.standard.bool(forKey: "Feather.openImportOnLaunch") ? .library : .sources
 
 	var body: some View {
 		TabView(selection: $selectedTab) {
@@ -20,5 +20,6 @@ struct TabbarView: View {
 					.tag(tab)
 			}
 		}
+		.onChange(of: selectedTab) { _ in FeatherHaptics.navigation() }
 	}
 }

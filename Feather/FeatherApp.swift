@@ -30,6 +30,14 @@ struct FeatherApp: App {
 					.transition(.move(edge: .top).combined(with: .opacity))
 			}
 			.animation(.smooth, value: downloadManager.manualDownloads.description)
+			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+				downloadManager.importPendingDownloads()
+				Task { await InstallTLSCertificates.shared.refreshIfNeeded() }
+			}
+			.onAppear {
+				if UIApplication.shared.applicationState == .active { downloadManager.importPendingDownloads() }
+			}
+			.task { await InstallTLSCertificates.shared.refreshIfNeeded() }
 			.onReceive(NotificationCenter.default.publisher(for: .heartbeatInvalidHost)) { _ in
 				DispatchQueue.main.async {
 					UIAlertController.showAlertWithOk(
@@ -160,9 +168,22 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 		_createDocumentsDirectories()
 		ResetView.clearWorkCache()
 		_addDefaultCertificates()
+		DownloadManager.shared.restoreTransfers()
 		return true
 	}
 	
+	func application(
+		_ application: UIApplication,
+		handleEventsForBackgroundURLSession identifier: String,
+		completionHandler: @escaping () -> Void
+	) {
+		if identifier == DownloadManager.sessionIdentifier {
+			DownloadManager.shared.acknowledgeBackgroundEvents(completionHandler)
+		} else {
+			completionHandler()
+		}
+	}
+
 	private func _createPipeline() {
 		DataLoader.sharedUrlCache.diskCapacity = 0
 		

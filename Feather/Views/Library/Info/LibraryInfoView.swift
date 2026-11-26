@@ -147,6 +147,13 @@ extension LibraryInfoView {
 				}
 			}
 
+			if let uuid = app.uuid, Storage.shared.pinnedUpdateSource(for: uuid) != nil {
+				Button(.localized("Reset Update Source"), systemImage: "pin.slash") {
+					_updateManager.pinSource(nil, for: uuid)
+					Task { await _refreshUpdate() }
+				}
+			}
+
 			Button(
 				updatesDisabled
 					? .localized("Enable Updates")

@@ -38,24 +38,17 @@ extension ServerInstaller {
 		return comps.url!
 	}
 	
-	var externalServerLink: String {
-		let baseUrl = "https://api.palera.in/genPlist?bundleid=\(app.identifier!)&name=\(app.name!)&version=\(app.version!)&fetchurl=\(self.payloadEndpoint.absoluteString)"
-		let encodedBaseUrl = baseUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
-		let finalEncodedUrl = encodedBaseUrl.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
-		
-		return finalEncodedUrl
-	}
+	var iTunesLink: URL? { installLink(for: plistEndpoint) }
 
-	var iTunesLink: String {
-		_iTunesLink(with: plistEndpoint.absoluteString)
-	}
-	
-	var iTunesLinkExternal: String {
-		_iTunesLink(with: externalServerLink)
-	}
-	
-	private func _iTunesLink(with url: String) -> String {
-		return "itms-services://?action=download-manifest&url=\(url)"
+	private func installLink(for url: URL) -> URL? {
+		var components = URLComponents()
+		components.scheme = "itms-services"
+		components.host = ""
+		var allowed = CharacterSet.alphanumerics
+		allowed.insert(charactersIn: "-._~")
+		guard let escaped = url.absoluteString.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
+		components.percentEncodedQuery = "action=download-manifest&url=" + escaped
+		return components.url
 	}
 
 	var displayImageSmallEndpoint: URL {
@@ -94,9 +87,12 @@ extension ServerInstaller {
 	}
 
 	var html: String {
-		"""
+		let link = manifestURL.flatMap(installLink(for:))?.absoluteString ?? ""
+		// The link contains an encoded query. JSON escaping keeps it inside the JS string.
+		let encoded = (try? JSONEncoder().encode(link)).flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+		return """
 		<html style="background-color: black;">
-		<script type="text/javascript">window.location="\(iTunesLinkExternal)"</script>
+		<script type="text/javascript">window.location=\(encoded)</script>
 		</html>
 		"""
 	}
@@ -118,10 +114,10 @@ extension ServerInstaller {
 				],
 			],
 			"metadata": [
-				"bundle-identifier": app.identifier,
-				"bundle-version": app.version,
+				"bundle-identifier": appIdentifier,
+				"bundle-version": appVersion,
 				"kind": "software",
-				"title": app.name,
+				"title": appName,
 			],
 		],],
 	]}

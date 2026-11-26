@@ -15,17 +15,15 @@ final class ArchiveHandler: NSObject {
 	@ObservedObject var viewModel: InstallerStatusViewModel
 	
 	private let _fileManager = FileManager.default
-	private let _uuid = UUID().uuidString
 	private var _payloadUrl: URL?
 	
 	private var _app: AppInfoPresentable
-	private let _uniqueWorkDir: URL
+	let installation = InstallationArchive()
+	private var _uniqueWorkDir: URL { installation.directory }
 	
 	init(app: AppInfoPresentable, viewModel: InstallerStatusViewModel) {
 		self.viewModel = viewModel
 		self._app = app
-		self._uniqueWorkDir = _fileManager.temporaryDirectory
-			.appendingPathComponent("FeatherInstall_\(_uuid)", isDirectory: true)
 		
 		super.init()
 	}
@@ -45,46 +43,46 @@ final class ArchiveHandler: NSObject {
 	}
 	
 	func archive() async throws -> URL {
-		return try await Task.detached(priority: .background) { [self] in
-			guard let payloadUrl = await self._payloadUrl else {
-				throw SigningFileHandlerError.appNotFound
-			}
-			
-			let zipUrl = self._uniqueWorkDir.appendingPathComponent("Archive.zip")
-			let ipaUrl = self._uniqueWorkDir.appendingPathComponent("Archive.ipa")
-			
+		guard let payloadUrl = _payloadUrl else { throw SigningFileHandlerError.appNotFound }
+		let archive = installation
+		let zipUrl = archive.directory.appendingPathComponent("Archive.zip")
+		let compression = ZipCompression.allCases[ArchiveHandler.getCompressionLevel()]
+		return try await Task.detached(priority: .background) { [viewModel, archive] in
 			try await Zip.zipFiles(
 				paths: [payloadUrl],
 				zipFilePath: zipUrl,
 				password: nil,
-				compression: ZipCompression.allCases[ArchiveHandler.getCompressionLevel()],
+				compression: compression,
 				progress: { progress in
 					Task { @MainActor in
-						self.viewModel.packageProgress = progress
+						viewModel.packageProgress = progress
 					}
 				})
 			
-			try FileManager.default.moveItem(at: zipUrl, to: ipaUrl)
-			return ipaUrl
+			try FileManager.default.moveItem(at: zipUrl, to: archive.url)
+			return archive.url
 		}.value
 	}
 	
 	func moveToArchive(_ package: URL, shouldOpen: Bool = false) async throws -> URL? {
-		let appendingString = "\(_app.name!)_\(_app.version!)_\(Int(Date().timeIntervalSince1970)).ipa"
-		let dest = _fileManager.archives.appendingPathComponent(appendingString)
-		
-		try? _fileManager.moveItem(
-			at: package,
-			to: dest
-		)
-		
+		let manager = FileManager.default
+		let title = [_app.name ?? "Feather", _app.version].compactMap { $0 }.joined(separator: " ")
+			.components(separatedBy: CharacterSet(charactersIn: "/:\\")).joined(separator: "-")
+		var destination = manager.archives.appendingPathComponent(title).appendingPathExtension("ipa")
+		var sequence = 2
+		while manager.fileExists(atPath: destination.path) {
+			destination = manager.archives.appendingPathComponent("\(title) (\(sequence))").appendingPathExtension("ipa")
+			sequence += 1
+		}
+		try manager.moveItem(at: package, to: destination)
+
 		if shouldOpen {
 			await MainActor.run {
 				UIApplication.open(FileManager.default.archives.toSharedDocumentsURL()!)
 			}
 		}
 		
-		return dest
+		return destination
 	}
 	
 	static func getCompressionLevel() -> Int {

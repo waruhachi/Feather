@@ -1,0 +1,208 @@
+diff --git a/ffi/src/tunnel_provider.rs b/ffi/src/tunnel_provider.rs
+index 58dd1f8..245bea6 100644
+--- a/ffi/src/tunnel_provider.rs
++++ b/ffi/src/tunnel_provider.rs
+@@ -45,6 +45,9 @@ async fn finish_tunnel(
+     let tunnel_stream = run_global_timeout(|| tokio::net::TcpStream::connect(tunnel_addr))
+         .await
+         .map_err(|e| IdeviceError::InternalError(format!("TLS tunnel: {e}")))?;
++    tunnel_stream
++        .set_nodelay(true)
++        .map_err(|e| IdeviceError::InternalError(format!("TLS tunnel TCP_NODELAY: {e}")))?;
+     let tunnel = connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key()).await?;
+ 
+     let client_ip: std::net::IpAddr = tunnel
+diff --git a/idevice/src/remote_pairing/tls_psk.rs b/idevice/src/remote_pairing/tls_psk.rs
+index 9b7360c..7dc2160 100644
+--- a/idevice/src/remote_pairing/tls_psk.rs
++++ b/idevice/src/remote_pairing/tls_psk.rs
+@@ -657,10 +657,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncWrite for TlsPskStrea
+         data: &[u8],
+     ) -> Poll<std::io::Result<usize>> {
+         let this = self.get_mut();
++        if data.is_empty() {
++            return Poll::Ready(Ok(0));
++        }
+ 
+         // Flush any pending partial write first
+         while !this.write_buf.is_empty() {
+             match Pin::new(&mut this.inner).poll_write(cx, &this.write_buf) {
++                Poll::Ready(Ok(0)) => {
++                    return Poll::Ready(Err(std::io::ErrorKind::WriteZero.into()));
++                }
+                 Poll::Ready(Ok(n)) => {
+                     this.write_buf.drain(..n);
+                 }
+@@ -678,6 +684,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncWrite for TlsPskStrea
+         this.write_seq += 1;
+ 
+         match Pin::new(&mut this.inner).poll_write(cx, &record) {
++            Poll::Ready(Ok(0)) => {
++                this.write_seq -= 1;
++                Poll::Ready(Err(std::io::ErrorKind::WriteZero.into()))
++            }
+             Poll::Ready(Ok(written)) => {
+                 if written < record.len() {
+                     // Buffer the unsent remainder
+@@ -690,9 +700,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncWrite for TlsPskStrea
+                 Poll::Ready(Err(e))
+             }
+             Poll::Pending => {
+-                // Buffer the entire record for later flush
++                // This layer accepted the plaintext into its bounded record buffer.
++                // Reporting Pending would make the caller submit the same bytes again.
+                 this.write_buf = record;
+-                Poll::Pending
++                Poll::Ready(Ok(chunk.len()))
+             }
+         }
+     }
+@@ -703,6 +714,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncWrite for TlsPskStrea
+         // Flush buffered write data first
+         while !this.write_buf.is_empty() {
+             match Pin::new(&mut this.inner).poll_write(cx, &this.write_buf) {
++                Poll::Ready(Ok(0)) => {
++                    return Poll::Ready(Err(std::io::ErrorKind::WriteZero.into()));
++                }
+                 Poll::Ready(Ok(n)) => {
+                     this.write_buf.drain(..n);
+                 }
+@@ -714,7 +728,137 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncWrite for TlsPskStrea
+         Pin::new(&mut this.inner).poll_flush(cx)
+     }
+ 
+-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
++    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
++        std::task::ready!(self.as_mut().poll_flush(cx))?;
+         Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+     }
+ }
++
++#[cfg(test)]
++mod write_tests {
++    use super::*;
++    use std::collections::VecDeque;
++    #[derive(Default)]
++    struct Writer {
++        bytes: Vec<u8>,
++        actions: VecDeque<Option<usize>>,
++        closed: bool,
++    }
++    impl AsyncRead for Writer {
++        fn poll_read(
++            self: Pin<&mut Self>,
++            _: &mut Context<'_>,
++            _: &mut ReadBuf<'_>,
++        ) -> Poll<std::io::Result<()>> {
++            Poll::Pending
++        }
++    }
++    impl AsyncWrite for Writer {
++        fn poll_write(
++            mut self: Pin<&mut Self>,
++            cx: &mut Context<'_>,
++            data: &[u8],
++        ) -> Poll<std::io::Result<usize>> {
++            match self.actions.pop_front().unwrap_or(Some(usize::MAX)) {
++                None => {
++                    cx.waker().wake_by_ref();
++                    Poll::Pending
++                }
++                Some(limit) => {
++                    let n = limit.min(data.len());
++                    self.bytes.extend_from_slice(&data[..n]);
++                    Poll::Ready(Ok(n))
++                }
++            }
++        }
++        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
++            Poll::Ready(Ok(()))
++        }
++        fn poll_shutdown(
++            mut self: Pin<&mut Self>,
++            _: &mut Context<'_>,
++        ) -> Poll<std::io::Result<()>> {
++            self.closed = true;
++            Poll::Ready(Ok(()))
++        }
++    }
++    fn stream(actions: Vec<Option<usize>>) -> TlsPskStream<Writer> {
++        TlsPskStream {
++            inner: Writer {
++                actions: actions.into(),
++                ..Default::default()
++            },
++            keys: KeyBlock {
++                client_mac_key: vec![1; 48],
++                server_mac_key: vec![2; 48],
++                client_write_key: vec![3; 32],
++                server_write_key: vec![4; 32],
++                suite: CipherSuite::Aes256CbcSha384,
++            },
++            write_seq: 0,
++            read_seq: 0,
++            read_buf: vec![],
++            pending_record: vec![],
++            pending_record_total: 0,
++            write_buf: vec![],
++        }
++    }
++    fn plaintext(s: &TlsPskStream<Writer>) -> Vec<u8> {
++        let mut wire = s.inner.bytes.as_slice();
++        let mut result = vec![];
++        let mut seq = 0;
++        while !wire.is_empty() {
++            assert!(wire.len() >= 5);
++            let size = u16::from_be_bytes([wire[3], wire[4]]) as usize;
++            assert!(wire.len() >= 5 + size);
++            result
++                .extend(decrypt_record(&s.keys, false, seq, wire[0], &wire[5..5 + size]).unwrap());
++            wire = &wire[5 + size..];
++            seq += 1;
++        }
++        assert_eq!(seq, s.write_seq);
++        result
++    }
++    #[tokio::test]
++    async fn pending_and_partial_writes_preserve_exact_bytes() {
++        let mut s = stream(vec![None, Some(7), None, Some(13), None]);
++        let data: Vec<u8> = (0..70000).map(|i| (i % 251) as u8).collect();
++        s.write_all(&data).await.unwrap();
++        s.flush().await.unwrap();
++        let actual = plaintext(&s);
++        assert_eq!(actual.len(), data.len());
++        assert_eq!(actual, data);
++    }
++    #[tokio::test]
++    async fn zero_write_is_an_error() {
++        let mut s = stream(vec![Some(0)]);
++        assert_eq!(
++            s.write(b"hello").await.unwrap_err().kind(),
++            std::io::ErrorKind::WriteZero
++        );
++    }
++    #[tokio::test]
++    async fn zero_write_while_flushing_is_an_error() {
++        let mut s = stream(vec![Some(1), Some(0)]);
++        s.write_all(b"hello").await.unwrap();
++        assert_eq!(
++            s.flush().await.unwrap_err().kind(),
++            std::io::ErrorKind::WriteZero
++        );
++    }
++    #[tokio::test]
++    async fn empty_write_has_no_record() {
++        let mut s = stream(vec![]);
++        assert_eq!(s.write(&[]).await.unwrap(), 0);
++        assert!(s.inner.bytes.is_empty());
++        assert_eq!(s.write_seq, 0);
++    }
++    #[tokio::test]
++    async fn shutdown_drains_accepted_bytes() {
++        let mut s = stream(vec![None]);
++        s.write_all(b"accepted").await.unwrap();
++        s.shutdown().await.unwrap();
++        assert!(s.inner.closed);
++        assert_eq!(plaintext(&s), b"accepted");
++    }
++}

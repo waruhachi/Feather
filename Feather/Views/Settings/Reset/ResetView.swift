@@ -155,6 +155,7 @@ extension ResetView {
 	}
 	
 	static func clearNetworkCache() {
+		Task { @MainActor in SourcesViewModel.shared.clearCache() }
 		URLCache.shared.removeAllCachedResponses()
 		HTTPCookieStorage.shared.removeCookies(since: Date.distantPast)
 		
@@ -190,6 +191,7 @@ extension ResetView {
 	}
 	
 	static func resetUserDefaults() {
+		SigningRecipe.reset()
 		UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
 	}
 	

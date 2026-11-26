@@ -29,10 +29,16 @@ struct TunnelView: View {
 				if doesHavePairingFile {
 					Text(.localized("Seems like you've gotten your hands on your pairing file!"))
 				} else {
-					Text(.localized("No pairing file found, please import it."))
+						Text(.localized("A pairing file is required for iDevice installation."))
 				}
 			}
-			
+
+			#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+			if #available(iOS 27.0, *) {
+				OnDevicePairingSection(hasPairingFile: $doesHavePairingFile)
+			}
+			#endif
+
 			Section {
 				Button(.localized("Import Pairing File"), systemImage: "square.and.arrow.down") {
 					_isImportingPairingPresenting = true

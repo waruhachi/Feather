@@ -3,9 +3,11 @@ SCHEME := Feather
 PLATFORMS := iphoneos maccatalyst
 
 TMP := $(TMPDIR)/$(NAME)
-CERT_JSON_URL := https://backloop.dev/pack.json
+TRANSPORT_CACHE := $(TMP)/transport
+CERT_JSON_URL := https://ryuksign-install.ryuksign.workers.dev/pack.json
 
-.PHONY: all clean deps $(PLATFORMS)
+.NOTPARALLEL:
+.PHONY: all clean deps transport $(PLATFORMS)
 
 all: $(PLATFORMS)
 
@@ -15,20 +17,21 @@ clean:
 	rm -rf Payload
 
 deps:
-	rm -rf deps || true
-	mkdir -p deps
+	python3 tools/refresh_install_tls.py --url "$(CERT_JSON_URL)" --output deps
 
-	curl -fsSL "$(CERT_JSON_URL)" -o cert.json
-	jq -r '.cert' cert.json > deps/server.crt
-	jq -r '.key1, .key2' cert.json > deps/server.pem
-	jq -r '.info.domains.commonName' cert.json > deps/commonName.txt
 
+transport:
+	python3 tools/idevice-transport/build.py --cache "$(TRANSPORT_CACHE)"
+
+iphoneos: transport
 
 $(PLATFORMS): deps
 	rm -rf _build
 
 	@if [ "$@" = "iphoneos" ]; then \
 		DEST="generic/platform=iOS"; \
+		xcodebuild -resolvePackageDependencies -project Feather.xcodeproj -scheme $(SCHEME) -destination "$$DEST" -derivedDataPath "$(TMP)/$@" -onlyUsePackageVersionsFromResolvedFile && \
+			python3 tools/idevice-transport/build.py --cache "$(TRANSPORT_CACHE)" --install-in "$(TMP)/$@" || exit $$?; \
 	else \
 		DEST="generic/platform=macOS,variant=Mac Catalyst"; \
 	fi; \
@@ -38,15 +41,20 @@ $(PLATFORMS): deps
 		-configuration Release \
 		-destination "$$DEST" \
 		-derivedDataPath $(TMP)/$@ \
+		$(if $(filter iphoneos,$@),-disableAutomaticPackageResolution) \
 		-skipPackagePluginValidation \
+		$(if $(FEATHER_BUILD_NUMBER),FEATHER_BUILD_NUMBER="$(FEATHER_BUILD_NUMBER)") \
 		CODE_SIGNING_ALLOWED=NO \
 		ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO
 
 	mkdir -p _build/Payload
 	cp -R _build/Applications/*.app _build/Payload/Feather.app
 	chmod -R 0755 _build/Payload/Feather.app
-	codesign --force --sign - --timestamp=none _build/Payload/Feather.app
 	cp deps/* _build/Payload/Feather.app/ || true
+	@for extension in _build/Payload/Feather.app/PlugIns/*.appex; do \
+		if [ -d "$$extension" ]; then codesign --force --sign - --timestamp=none "$$extension" || exit $$?; fi; \
+	done
+	codesign --force --sign - --timestamp=none _build/Payload/Feather.app
 
 	mkdir -p packages
 

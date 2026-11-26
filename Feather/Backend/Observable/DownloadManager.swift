@@ -8,9 +8,9 @@
 import BackgroundTasks
 import Combine
 import Foundation
-import UIKit.UIImpactFeedbackGenerator
+import UIKit
 
-class Download: Identifiable, @unchecked Sendable {
+class Download: ObservableObject, Identifiable, @unchecked Sendable {
 	@Published var progress: Double = 0.0
 	@Published var bytesDownloaded: Int64 = 0
 	@Published var totalBytes: Int64 = 0
@@ -23,9 +23,15 @@ class Download: Identifiable, @unchecked Sendable {
 	}
 
 	var task: URLSessionDownloadTask?
-	var resumeData: Data?
+	@Published var isImporting = false
+	@Published var isPaused = false
+	let importControl = ImportControl()
+	var importTask: Task<Void, Never>?
+	var importCompletion: [(Result<String, Error>) -> Void] = []
 
 	let id: String
+	let transferID: UUID
+	let updateFromUUID: String?
 	let url: URL
 	let fileName: String
 	let onlyArchiving: Bool
@@ -35,11 +41,15 @@ class Download: Identifiable, @unchecked Sendable {
 	init(
 		id: String,
 		url: URL,
+		transferID: UUID = UUID(),
+		updateFromUUID: String? = nil,
 		onlyArchiving: Bool = false,
 		sourceProvenance: SourceAppProvenance? = nil,
 		importOrigin: IPAImportOrigin? = nil
 	) {
 		self.id = id
+		self.transferID = transferID
+		self.updateFromUUID = updateFromUUID
 		self.url = url
 		self.onlyArchiving = onlyArchiving
 		self.sourceProvenance = sourceProvenance
@@ -60,7 +70,34 @@ class DownloadManager: NSObject, ObservableObject {
 		downloads.filter { isManualDownload($0.id) }
 	}
 
+	static let sessionIdentifier = "\(Bundle.main.bundleIdentifier ?? "Feather").ipa-downloads"
+	private var backgroundCompletion: (() -> Void)?
 	private var _session: URLSession!
+	private var pendingDirectory: URL {
+		URL.applicationSupportDirectory.appendingPathComponent("FeatherPendingDownloads", isDirectory: true)
+	}
+
+	private struct Transfer: Codable {
+		let id: String
+		let transferID: UUID
+		let updateFromUUID: String?
+		let url: URL
+		let provenance: SourceAppProvenance?
+		let origin: IPAImportOrigin
+
+		init(_ download: Download) {
+			id = download.id
+			transferID = download.transferID
+			updateFromUUID = download.updateFromUUID
+			url = download.url
+			provenance = download.sourceProvenance
+			origin = download.importOrigin
+		}
+
+		func makeDownload() -> Download {
+			Download(id: id, url: url, transferID: transferID, updateFromUUID: updateFromUUID, sourceProvenance: provenance, importOrigin: origin)
+		}
+	}
 
 	#if !targetEnvironment(macCatalyst)
 		private func _updateBackgroundAudioState() {
@@ -76,19 +113,74 @@ class DownloadManager: NSObject, ObservableObject {
 
 	override init() {
 		super.init()
-		let configuration = URLSessionConfiguration.default
+		let configuration = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
+		configuration.sessionSendsLaunchEvents = true
+		configuration.isDiscretionary = false
 		_session = URLSession(
 			configuration: configuration,
 			delegate: self,
-			delegateQueue: nil
+			delegateQueue: .main
 		)
+	}
+
+	func restoreTransfers(completion: (() -> Void)? = nil) {
+		_session.getAllTasks { tasks in
+			DispatchQueue.main.async {
+				for task in tasks.compactMap({ $0 as? URLSessionDownloadTask }) {
+					_ = self.download(for: task)
+				}
+				self.updateLiveActivity()
+				completion?()
+			}
+		}
+	}
+
+	func acknowledgeBackgroundEvents(_ completion: @escaping () -> Void) {
+		backgroundCompletion = completion
+	}
+
+	func importPendingDownloads() {
+		let manager = FileManager.default
+		guard let folders = try? manager.contentsOfDirectory(at: pendingDirectory, includingPropertiesForKeys: nil) else { return }
+		for folder in folders {
+			let file = folder.appendingPathComponent("Package.ipa")
+			let manifest = folder.appendingPathComponent("Transfer.json")
+			guard manager.fileExists(atPath: file.path),
+				let data = try? Data(contentsOf: manifest),
+				let transfer = try? JSONDecoder().decode(Transfer.self, from: data)
+			else {
+				try? manager.removeItem(at: folder)
+				continue
+			}
+			let download = downloads.first(where: { $0.transferID == transfer.transferID }) ?? transfer.makeDownload()
+			if !downloads.contains(where: { $0 === download }) { downloads.append(download) }
+			guard download.importTask == nil else { continue }
+			download.progress = 1
+			try? handlePachageFile(url: file, dl: download, removeAfterImport: true)
+		}
+		updateLiveActivity()
+	}
+
+	private func download(for task: URLSessionDownloadTask) -> Download? {
+		if let download = getDownloadTask(by: task) { return download }
+		guard let description = task.taskDescription,
+			let data = Data(base64Encoded: description),
+			let transfer = try? JSONDecoder().decode(Transfer.self, from: data)
+		else { return nil }
+		let download = downloads.first(where: { $0.transferID == transfer.transferID }) ?? transfer.makeDownload()
+		if !downloads.contains(where: { $0 === download }) { downloads.append(download) }
+		download.task = task
+		if task.state == .suspended { download.isPaused = true }
+		return download
 	}
 
 	func startDownload(
 		from url: URL,
 		id: String = UUID().uuidString,
 		sourceProvenance: SourceAppProvenance? = nil,
-		importOrigin: IPAImportOrigin? = nil
+		importOrigin: IPAImportOrigin? = nil,
+		updateFromUUID: String? = nil,
+		onImport: ((Result<String, Error>) -> Void)? = nil
 	) -> Download {
 		let requestedOrigin =
 			sourceProvenance.map {
@@ -99,7 +191,9 @@ class DownloadManager: NSObject, ObservableObject {
 				&& $0.sourceProvenance?.sourceVersionID
 					== sourceProvenance?.sourceVersionID
 				&& $0.importOrigin == requestedOrigin
+				&& $0.updateFromUUID == updateFromUUID
 		}) {
+			if let onImport { existingDownload.importCompletion.append(onImport) }
 			resumeDownload(existingDownload)
 			return existingDownload
 		}
@@ -107,26 +201,27 @@ class DownloadManager: NSObject, ObservableObject {
 		let download = Download(
 			id: id,
 			url: url,
+			updateFromUUID: updateFromUUID,
 			sourceProvenance: sourceProvenance,
 			importOrigin: importOrigin
 		)
 
-		let task = _session.downloadTask(with: url)
-		download.task = task
-		task.resume()
-
-		downloads.append(download)
-
-		#if !targetEnvironment(macCatalyst)
-			if #available(iOS 26.0, *) {
-				BackgroundTaskManager.shared.startTask(
-					for: id,
-					filename: url.lastPathComponent
-				)
-			} else {
-				_updateBackgroundAudioState()
+		guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+			let data = try? JSONEncoder().encode(Transfer(download))
+		else {
+			DispatchQueue.main.async {
+				onImport?(.failure(URLError(.unsupportedURL)))
+				FeatherHaptics.result(.error)
 			}
-		#endif
+			return download
+		}
+		if let onImport { download.importCompletion.append(onImport) }
+		let task = _session.downloadTask(with: url)
+		task.taskDescription = data.base64EncodedString()
+		download.task = task
+		downloads.append(download)
+		task.resume()
+		updateLiveActivity()
 
 		return download
 	}
@@ -152,42 +247,51 @@ class DownloadManager: NSObject, ObservableObject {
 	}
 
 	func resumeDownload(_ download: Download) {
-		if let resumeData = download.resumeData {
-			let task = _session.downloadTask(withResumeData: resumeData)
-			download.task = task
-			task.resume()
+		setPaused(false, for: download)
+	}
 
-			#if !targetEnvironment(macCatalyst)
-				_updateBackgroundAudioState()
-			#endif
-		} else if let url = download.task?.originalRequest?.url {
-			let task = _session.downloadTask(with: url)
-			download.task = task
-			task.resume()
-
-			#if !targetEnvironment(macCatalyst)
-				_updateBackgroundAudioState()
-			#endif
+	func setPaused(_ paused: Bool, for download: Download) {
+		guard download.isPaused != paused else { return }
+		if download.isImporting {
+			download.importControl.setPaused(paused)
+		} else if let task = download.task, task.state == .running || task.state == .suspended {
+			if paused { task.suspend() } else { task.resume() }
+		} else {
+			return
 		}
+		download.isPaused = paused
+		updateLiveActivity()
 	}
 
 	func cancelDownload(_ download: Download) {
-		download.task?.cancel()
-
-		if let index = downloads.firstIndex(where: { $0.id == download.id }) {
-			downloads.remove(at: index)
-
-			#if !targetEnvironment(macCatalyst)
-				_updateBackgroundAudioState()
-
-				if #available(iOS 26.0, *) {
-					BackgroundTaskManager.shared.stopTask(
-						for: download.id,
-						success: false
-					)
-				}
-			#endif
+		if let importTask = download.importTask {
+			download.importControl.cancel()
+			importTask.cancel()
+			return
 		}
+		download.task?.taskDescription = nil
+		download.task?.cancel()
+		try? FileManager.default.removeItem(at: pendingDirectory.appendingPathComponent(download.transferID.uuidString))
+		finish(download, result: .failure(CancellationError()))
+	}
+
+	private func finish(_ download: Download, result: Result<String, Error>) {
+		guard let index = downloads.firstIndex(where: { $0 === download }) else { return }
+		downloads.remove(at: index)
+		download.importTask = nil
+		download.task = nil
+		let completions = download.importCompletion
+		download.importCompletion.removeAll()
+
+		#if !targetEnvironment(macCatalyst)
+			_updateBackgroundAudioState()
+			if #available(iOS 26.0, *) {
+				BackgroundTaskManager.shared.stopTask(for: download.id, success: (try? result.get()) != nil)
+			}
+		#endif
+
+		updateLiveActivity(finished: download, result: result)
+		for completion in completions { completion(result) }
 	}
 
 	func isManualDownload(_ string: String) -> Bool {
@@ -209,38 +313,31 @@ class DownloadManager: NSObject, ObservableObject {
 
 extension DownloadManager: URLSessionDownloadDelegate {
 
-	func handlePachageFile(url: URL, dl: Download) throws {
-		FR.handlePackageFile(url, download: dl) { err in
-			if err != nil {
-				let generator = UINotificationFeedbackGenerator()
-				generator.notificationOccurred(.error)
+	func handlePachageFile(url: URL, dl: Download, removeAfterImport: Bool = false) throws {
+		#if !targetEnvironment(macCatalyst)
+			if #available(iOS 26.0, *), UIApplication.shared.applicationState == .active {
+				BackgroundTaskManager.shared.startTask(for: dl.id, filename: dl.fileName)
+			}
+		#endif
+
+		dl.isImporting = true
+		if dl.isPaused { dl.importControl.setPaused(true) }
+		updateLiveActivity()
+		dl.importTask = Task { @MainActor in
+			let scoped = url.startAccessingSecurityScopedResource()
+			defer {
+				if scoped { url.stopAccessingSecurityScopedResource() }
+				if removeAfterImport { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 			}
 
-			DispatchQueue.main.async {
-				if let index = DownloadManager.shared.getDownloadIndex(
-					by: dl.id
-				) {
-					DownloadManager.shared.downloads.remove(at: index)
-
-					#if !targetEnvironment(macCatalyst)
-						if #available(iOS 26.0, *) {
-							if err == nil {
-								BackgroundTaskManager.shared
-									.updateProgress(
-										for: dl.id,
-										progress: 1.0
-									)
-							} else {
-								BackgroundTaskManager.shared.stopTask(
-									for: dl.id,
-									success: false
-								)
-							}
-						}
-
-						self._updateBackgroundAudioState()
-					#endif
+			do {
+				let uuid = try await FR.importPackage(url, download: dl)
+				finish(dl, result: .success(uuid))
+			} catch {
+				if !(error is CancellationError) {
+					FeatherHaptics.result(.error)
 				}
+				finish(dl, result: .failure(error))
 			}
 		}
 	}
@@ -250,32 +347,27 @@ extension DownloadManager: URLSessionDownloadDelegate {
 		downloadTask: URLSessionDownloadTask,
 		didFinishDownloadingTo location: URL
 	) {
-		guard let download = getDownloadTask(by: downloadTask) else { return }
+		guard let download = download(for: downloadTask) else { return }
 
-		let tempDirectory = FileManager.default.temporaryDirectory
-		let customTempDir = tempDirectory.appendingPathComponent(
-			"FeatherDownloads",
-			isDirectory: true
-		)
-
+		let directory = pendingDirectory.appendingPathComponent(download.transferID.uuidString, isDirectory: true)
 		do {
-			try FileManager.default.createDirectoryIfNeeded(at: customTempDir)
-
-			// Use the server-suggested filename if available, otherwise fallback
-			let suggestedFileName =
-				downloadTask.response?.suggestedFilename ?? download.fileName
-			let destinationURL = customTempDir.appendingPathComponent(
-				suggestedFileName
-			)
-
-			try FileManager.default.removeFileIfNeeded(at: destinationURL)
-			try FileManager.default.moveItem(at: location, to: destinationURL)
-
-			try handlePachageFile(url: destinationURL, dl: download)
+			if let response = downloadTask.response as? HTTPURLResponse,
+				!(200...299).contains(response.statusCode)
+			{
+				throw URLError(.badServerResponse)
+			}
+			try FileManager.default.createDirectoryIfNeeded(at: directory)
+			let destination = directory.appendingPathComponent("Package.ipa")
+			try JSONEncoder().encode(Transfer(download)).write(to: directory.appendingPathComponent("Transfer.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+			try FileManager.default.moveItem(at: location, to: destination)
+			download.progress = 1
+			updateLiveActivity()
+			if UIApplication.shared.applicationState == .active {
+				try handlePachageFile(url: destination, dl: download, removeAfterImport: true)
+			}
 		} catch {
-			print(
-				"Error handling downloaded file: \(error.localizedDescription)"
-			)
+			try? FileManager.default.removeItem(at: directory)
+			finish(download, result: .failure(error))
 		}
 	}
 
@@ -286,7 +378,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
 		totalBytesWritten: Int64,
 		totalBytesExpectedToWrite: Int64
 	) {
-		guard let download = getDownloadTask(by: downloadTask) else { return }
+		guard let download = download(for: downloadTask), download.importTask == nil else { return }
 
 		DispatchQueue.main.async {
 			download.progress =
@@ -295,6 +387,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
 				: 0
 			download.bytesDownloaded = totalBytesWritten
 			download.totalBytes = totalBytesExpectedToWrite
+			self.updateLiveActivity()
 
 			#if !targetEnvironment(macCatalyst)
 				if #available(iOS 26.0, *) {
@@ -312,18 +405,15 @@ extension DownloadManager: URLSessionDownloadDelegate {
 		task: URLSessionTask,
 		didCompleteWithError error: Error?
 	) {
-		guard
-			error != nil,
-			let downloadTask = task as? URLSessionDownloadTask,
-			let download = getDownloadTask(by: downloadTask)
-		else {
-			return
-		}
-
-		DispatchQueue.main.async {
-			if let index = self.getDownloadIndex(by: download.id) {
-				self.downloads.remove(at: index)
-			}
-		}
+		guard let error, let downloadTask = task as? URLSessionDownloadTask,
+			let download = download(for: downloadTask), download.importTask == nil
+		else { return }
+		finish(download, result: .failure(error))
 	}
+	func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+		let completion = backgroundCompletion
+		backgroundCompletion = nil
+		completion?()
+	}
+
 }

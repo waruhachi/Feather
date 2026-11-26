@@ -23,84 +23,60 @@ extension ServerInstaller {
 	}()
 	
 	func setupApp(port: Int) throws -> Application {
+		var configuration: TLSConfiguration?
+		let useOnDeviceCertificate = getServerMethod() == 0 && LocalCertificate.isEnabled
+		if getServerMethod() != 1 {
+			let identity: InstallTLSIdentity
+			if useOnDeviceCertificate {
+				identity = try LocalCertificate.identity()
+				guard try identity.isTrusted() else { throw InstallTLSFailure.localCertificateUntrusted }
+			} else {
+				guard let preferred = InstallTLSCertificates.preferredIdentity() else {
+					throw InstallTLSFailure.certificateUnavailable
+				}
+				identity = preferred
+			}
+			configuration = try identity.configuration()
+			tlsHost = identity.host
+		}
+
 		let app = Application(Self.env)
 		app.threadPool = .init(numberOfThreads: 1)
-		
-		if getServerMethod() != 1 {
-			if let tls = try tls() {
-				app.http.server.configuration.tlsConfiguration = tls
-			}
-		}
-		
+		app.http.server.configuration.tlsConfiguration = configuration
 		app.http.server.configuration.hostname = sni()
 		app.http.server.configuration.tcpNoDelay = true
-		app.http.server.configuration.address = .hostname("0.0.0.0", port: port)
+		// The on-device hostname can resolve to IPv6 loopback first.
+		let address = useOnDeviceCertificate ? "::" : "0.0.0.0"
+		app.http.server.configuration.address = .hostname(address, port: port)
 		app.http.server.configuration.port = port
 		app.routes.defaultMaxBodySize = "128mb"
 		app.routes.caseInsensitive = false
-		
+
 		return app
 	}
-	
-	// MARK: Files/IP
+
 	func sni() -> String {
 		let localhost = "127.0.0.1"
-		
 		if getServerMethod() == 1 {
-			return !self.getIPFix()
-				? (Self.getLocalAddress() ?? localhost)
-				: localhost
-		} else {
-			return readCommonName() ?? localhost
+			return getIPFix() ? localhost : Self.getLocalAddress() ?? localhost
 		}
+		return tlsHost ?? localhost
 	}
-	
-	func tls() throws -> TLSConfiguration? {
-		guard
-			let crt = Self.getUrl("server", ext: "crt"),
-			let pem = Self.getUrl("server", ext: "pem")
-		else {
-			return nil
-		}
-		
-		return try TLSConfiguration.makeServerConfiguration(
-			certificateChain: NIOSSLCertificate.fromPEMFile(crt.path).map {
-				NIOSSLCertificateSource.certificate($0)
-			},
-			privateKey: .privateKey(
-				try NIOSSLPrivateKey(file: pem.path, format: .pem)
-			)
-		)
-	}
-	
-	func readCommonName() -> String? {
-		guard let url = Self.getUrl("commonName", ext: "txt") else {
-			return nil
-		}
-		
-		return try? String(contentsOf: url, encoding: .utf8)
-			.trimmingCharacters(in: .whitespacesAndNewlines)
-	}
-}
 
-extension ServerInstaller {
-	static func getUrl(_ name: String, ext: String) -> URL? {
-		let fileManager = FileManager.default
-		
-		let documentsURL = URL.documentsDirectory.appendingPathComponent("\(name).\(ext)")
-		let bundlesURL = Bundle.main.url(forResource: name, withExtension: ext)
-		
-		if fileManager.fileExists(atPath: documentsURL.path) {
-			return documentsURL
+	func verifyHTTPS() async throws {
+		guard getServerMethod() != 1 else { return }
+		let url = plistEndpoint.deletingLastPathComponent().appendingPathComponent("healthz")
+		let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+		do {
+			let (_, response) = try await URLSession.shared.data(for: request)
+			guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+				throw InstallTLSFailure.preflightFailed
+			}
+		} catch {
+			throw InstallTLSFailure.preflightFailed
 		}
-		
-		if let bundlesURL, fileManager.fileExists(atPath: bundlesURL.path) {
-			return bundlesURL
-		}
-		
-		return nil
 	}
-	
+
 	static func getLocalAddress() -> String? {
 		var address: String?
 		var ifaddr: UnsafeMutablePointer<ifaddrs>?

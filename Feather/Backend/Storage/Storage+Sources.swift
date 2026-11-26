@@ -31,20 +31,20 @@ extension Storage {
 			Logger.misc.debug("ignoring \(identifier)")
 			return
 		}
-		
-		let generator = UIImpactFeedbackGenerator(style: .light)
-		
+
+
+
 		let new = AltSource(context: context)
 		new.name = name
 		new.date = Date()
 		new.identifier = identifier
 		new.sourceURL = url
 		new.iconURL = iconURL
-		
+
 		do {
 			if !deferSave {
 				try context.save()
-				generator.impactOccurred()
+				FeatherHaptics.action()
 			}
 			completion(nil)
 		} catch {
@@ -75,8 +75,8 @@ extension Storage {
 		repos: [URL: ASRepository],
 		completion: @escaping (Error?) -> Void
 	) {
-		let generator = UIImpactFeedbackGenerator(style: .light)
-		
+
+
 		for (url, repo) in repos {
 			addSource(
 				url,
@@ -89,9 +89,9 @@ extension Storage {
 				}
 			)
 		}
-		
+
 		saveContext()
-		generator.impactOccurred()
+		FeatherHaptics.action()
 		completion(nil)
 	}
 

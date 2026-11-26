@@ -68,6 +68,45 @@ final class UpdateManager: ObservableObject {
 		updates[uuid] = nil
 	}
 
+	func sourceChoices(for app: AppInfoPresentable, sources: [AltSource]) async -> [AppUpdate] {
+		guard let uuid = app.uuid, let current = updates[uuid] else { return [] }
+		let repositories = await _fetchRepositories(from: sources)
+		let metadata = Storage.shared.sourceMetadata(for: uuid)
+		guard updates[uuid] == current, metadata?.updatesDisabled != true else { return [] }
+		guard current.providerKind == .featherSource else { return [current] }
+
+		var choices = [current]
+		for (source, repository) in repositories {
+			guard let url = source.sourceURL,
+				!choices.contains(where: { $0.sourceURL.map(_normalizedSourceURL) == _normalizedSourceURL(url) }),
+				let candidate = _sourceUpdate(
+					in: repository,
+					sourceURL: url,
+					localUUID: uuid,
+					identifier: current.bundleIdentifier,
+					localVersion: current.localVersion
+				),
+				candidate.versionID != metadata?.skippedUpdateVersionID
+			else { continue }
+			choices.append(candidate)
+		}
+		return choices
+	}
+
+	func pinSource(_ choice: AppUpdate?, for appUUID: String) {
+		Storage.shared.setPinnedUpdateSource(choice?.sourceURL, for: appUUID)
+		updates[appUUID] = choice
+	}
+
+	func canApply(_ candidate: AppUpdate) -> Bool {
+		guard let current = updates[candidate.localUUID],
+			current.bundleIdentifier == candidate.bundleIdentifier,
+			current.localVersion == candidate.localVersion
+		else { return false }
+		let metadata = Storage.shared.sourceMetadata(for: candidate.localUUID)
+		return metadata?.updatesDisabled != true && metadata?.skippedUpdateVersionID != candidate.versionID
+	}
+
 	func appStoreURL(bundleIdentifier: String) async -> URL? {
 		guard
 			let appStoreApp = await _lookupAppStoreApp(
@@ -325,86 +364,57 @@ final class UpdateManager: ObservableObject {
 			storedSourceURL = localSourceURL
 		}
 
-		var candidateRepositories = repositories.compactMap {
-			source,
-			repository -> (URL, ASRepository)? in
-			guard let sourceURL = source.sourceURL else { return nil }
-			return (sourceURL, repository)
+		let preferredSource = Storage.shared.pinnedUpdateSource(for: localUUID)
+			?? Storage.shared.inheritedUpdateSource(for: localUUID)
+			?? storedSourceURL
+		let matchingRepository = repositories.first {
+			guard let url = $0.0.sourceURL else { return false }
+			return _matchesStoredRepository(storedSourceURL: preferredSource, sourceURL: url)
 		}
-		if !candidateRepositories.contains(where: {
-			let sourceURL = $0.0
-			return _matchesStoredRepository(
-				storedSourceURL: storedSourceURL,
-				sourceURL: sourceURL
-			)
-		}), let repository = await _fetchRepository(from: storedSourceURL) {
-			candidateRepositories.append((storedSourceURL, repository))
+		let repository: ASRepository?
+		if let matchingRepository {
+			repository = matchingRepository.1
+		} else {
+			repository = await _fetchRepository(from: preferredSource)
 		}
+		guard let repository else { return nil }
+		return _sourceUpdate(
+			in: repository,
+			sourceURL: matchingRepository?.0.sourceURL ?? preferredSource,
+			localUUID: localUUID,
+			identifier: sourceAppIdentifier,
+			localVersion: sourceAppVersion ?? localApp.version
+		)
+	}
 
-		for (sourceURL, repository) in candidateRepositories {
-			guard
-				_matchesStoredRepository(
-					storedSourceURL: storedSourceURL,
-					sourceURL: sourceURL
-				)
-			else {
-				continue
-			}
+	private func _sourceUpdate(
+		in repository: ASRepository,
+		sourceURL: URL,
+		localUUID: String,
+		identifier: String,
+		localVersion: String?
+	) -> AppUpdate? {
+		guard let app = repository.apps.first(where: { $0.id == identifier }),
+			let version = app.currentVersion, !version.isEmpty,
+			_isRemoteVersion(version, newerThan: localVersion),
+			let downloadURL = app.currentDownloadUrl,
+			let provenance = SourceAppProvenance(sourceURL: sourceURL, repository: repository, app: app)
+		else { return nil }
 
-			guard
-				let remoteApp = repository.apps.first(where: {
-					$0.id == sourceAppIdentifier
-				})
-			else {
-				continue
-			}
-
-			guard let remoteVersion = remoteApp.currentVersion,
-				!remoteVersion.isEmpty
-			else {
-				continue
-			}
-
-			guard
-				_isRemoteVersion(
-					remoteVersion,
-					newerThan: sourceAppVersion ?? localApp.version
-				)
-			else {
-				continue
-			}
-
-			guard let downloadURL = remoteApp.currentDownloadUrl else {
-				continue
-			}
-
-			guard
-				let provenance = SourceAppProvenance(
-					sourceURL: sourceURL,
-					repository: repository,
-					app: remoteApp
-				)
-			else {
-				continue
-			}
-
-			return AppUpdate(
-				id: localUUID,
-				localUUID: localUUID,
-				localVersion: sourceAppVersion ?? localApp.version,
-				remoteVersion: remoteVersion,
-				appName: remoteApp.currentName,
-				bundleIdentifier: sourceAppIdentifier,
-				downloadURL: downloadURL,
-				webURL: sourceURL,
-				versionID: provenance.sourceVersionID,
-				providerKind: .featherSource,
-				sourceURL: sourceURL,
-				sourceProvenance: provenance
-			)
-		}
-
-		return nil
+		return AppUpdate(
+			id: localUUID,
+			localUUID: localUUID,
+			localVersion: localVersion,
+			remoteVersion: version,
+			appName: app.currentName,
+			bundleIdentifier: identifier,
+			downloadURL: downloadURL,
+			webURL: sourceURL,
+			versionID: provenance.sourceVersionID,
+			providerKind: .featherSource,
+			sourceURL: sourceURL,
+			sourceProvenance: provenance
+		)
 	}
 
 	private func _effectiveProviderKind(

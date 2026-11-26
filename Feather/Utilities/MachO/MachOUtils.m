@@ -117,3 +117,74 @@ NSString *LCPatchMachOForSDK26(const char *path) {
 	close(fd);
 	return result;
 }
+
+static int InspectIOSSlice(const uint8_t *bytes, size_t size) {
+	struct mach_header_64 header;
+	if (size < sizeof(uint32_t)) return 0;
+	uint32_t magic;
+	memcpy(&magic, bytes, sizeof(magic));
+	if (magic == MH_MAGIC || magic == MH_CIGAM || magic == MH_CIGAM_64) return 2;
+	if (magic != MH_MAGIC_64 || size < sizeof(header)) return 0;
+	memcpy(&header, bytes, sizeof(header));
+	if (header.cputype != CPU_TYPE_ARM64) return 2;
+
+	size_t cursor = sizeof(header);
+	if (header.sizeofcmds > size - cursor) return 0;
+	size_t end = cursor + header.sizeofcmds;
+	for (uint32_t i = 0; i < header.ncmds; i++) {
+		struct load_command command;
+		if (end - cursor < sizeof(command)) return 0;
+		memcpy(&command, bytes + cursor, sizeof(command));
+		if (command.cmdsize < sizeof(command) || command.cmdsize > end - cursor) return 0;
+		if (command.cmd == LC_ENCRYPTION_INFO || command.cmd == LC_ENCRYPTION_INFO_64) {
+			struct encryption_info_command encryption;
+			if (command.cmdsize < sizeof(encryption)) return 0;
+			memcpy(&encryption, bytes + cursor, sizeof(encryption));
+			if (encryption.cryptid != 0) return 1;
+		}
+		cursor += command.cmdsize;
+	}
+	return 0;
+}
+
+int LCInspectIOSExecutable(const char *path) {
+	NSData *data = [NSData dataWithContentsOfFile:@(path) options:NSDataReadingMappedIfSafe error:NULL];
+	const uint8_t *bytes = data.bytes;
+	size_t size = data.length;
+	uint32_t magic;
+	if (size < sizeof(magic)) return 0;
+	memcpy(&magic, bytes, sizeof(magic));
+	magic = OSSwapBigToHostInt32(magic);
+	if (magic != FAT_MAGIC && magic != FAT_MAGIC_64) return InspectIOSSlice(bytes, size);
+
+	struct fat_header header;
+	if (size < sizeof(header)) return 0;
+	memcpy(&header, bytes, sizeof(header));
+	uint32_t count = OSSwapBigToHostInt32(header.nfat_arch);
+	size_t stride = magic == FAT_MAGIC_64 ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
+	if (count == 0 || count > (size - sizeof(header)) / stride) return 0;
+
+	bool foundARM64 = false;
+	for (uint32_t i = 0; i < count; i++) {
+		const uint8_t *entry = bytes + sizeof(header) + i * stride;
+		uint32_t cpu;
+		memcpy(&cpu, entry, sizeof(cpu));
+		if (OSSwapBigToHostInt32(cpu) != CPU_TYPE_ARM64) continue;
+
+		foundARM64 = true;
+		uint64_t offset, length;
+		if (magic == FAT_MAGIC_64) {
+			struct fat_arch_64 arch;
+			memcpy(&arch, entry, sizeof(arch));
+			offset = OSSwapBigToHostInt64(arch.offset);
+			length = OSSwapBigToHostInt64(arch.size);
+		} else {
+			struct fat_arch arch;
+			memcpy(&arch, entry, sizeof(arch));
+			offset = OSSwapBigToHostInt32(arch.offset);
+			length = OSSwapBigToHostInt32(arch.size);
+		}
+		if (offset <= size && length <= size - offset && InspectIOSSlice(bytes + offset, (size_t)length) == 1) return 1;
+	}
+	return foundARM64 ? 0 : 2;
+}

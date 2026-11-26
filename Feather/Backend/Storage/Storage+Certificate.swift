@@ -7,10 +7,10 @@
 
 import CoreData
 import UIKit.UIImpactFeedbackGenerator
-import Zsign
 
 // MARK: - Class extension: certificate
 extension Storage {
+	@MainActor
 	func addCertificate(
 		uuid: String,
 		password: String? = nil,
@@ -20,7 +20,7 @@ extension Storage {
 		isDefault: Bool = false,
 		completion: @escaping (Error?) -> Void
 	) {
-		let generator = UIImpactFeedbackGenerator(style: .light)
+
 
 		let new = CertificatePair(context: context)
 		new.uuid = uuid
@@ -30,9 +30,9 @@ extension Storage {
 		new.expiration = expiration
 		new.nickname = nickname
 		new.isDefault = isDefault
-		Storage.shared.revokagedCertificate(for: new)
 		saveContext()
-		generator.impactOccurred()
+		revokagedCertificate(for: new)
+		FeatherHaptics.action()
 		completion(nil)
 	}
 
@@ -61,22 +61,23 @@ extension Storage {
 		return results[index]
 	}
 
+	@MainActor
 	func revokagedCertificate(for cert: CertificatePair) {
-		guard !cert.revoked else { return }
+		guard !cert.revoked, let p12 = getFile(.certificate, from: cert) else { return }
 
-		Zsign.checkRevokage(
-			provisionPath: Storage.shared.getFile(.provision, from: cert)?.path
-				?? "",
-			p12Path: Storage.shared.getFile(.certificate, from: cert)?.path
-				?? "",
-			p12Password: cert.password ?? ""
-		) { (status, _, _) in
-			if status == 1 {
-				DispatchQueue.main.async {
-					cert.revoked = true
-					self.saveContext()
-				}
-			}
+		let password = cert.password ?? ""
+		let certificateID = cert.objectID
+		Task {
+			let result = await Task.detached(priority: .utility) {
+				CertificateRevocation.check(p12: p12, password: password)
+			}.value
+			guard result == .revoked,
+				let stored = (try? context.existingObject(with: certificateID)) as? CertificatePair,
+				!stored.isDeleted
+			else { return }
+
+			stored.revoked = true
+			saveContext()
 		}
 	}
 

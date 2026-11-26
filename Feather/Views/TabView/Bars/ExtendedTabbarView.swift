@@ -15,6 +15,7 @@ struct ExtendedTabbarView: View {
 	@AppStorage("Feather.tabCustomization") var customization = TabViewCustomization()
 	@StateObject var viewModel = SourcesViewModel.shared
 	
+	@State private var _selectedTab = UserDefaults.standard.bool(forKey: "Feather.openImportOnLaunch") ? TabEnum.library.rawValue : TabEnum.sources.rawValue
 	@State private var _isAddingPresenting = false
 	
 	@FetchRequest(
@@ -24,15 +25,15 @@ struct ExtendedTabbarView: View {
 	) private var _sources: FetchedResults<AltSource>
 		
 	var body: some View {
-		TabView {
+		TabView(selection: $_selectedTab) {
 			ForEach(TabEnum.defaultTabs, id: \.hashValue) { tab in
-				Tab(tab.title, systemImage: tab.icon) {
+				Tab(tab.title, systemImage: tab.icon, value: tab.rawValue) {
 					TabEnum.view(for: tab)
 				}
 			}
 			
 			ForEach(TabEnum.customizableTabs, id: \.hashValue) { tab in
-				Tab(tab.title, systemImage: tab.icon) {
+				Tab(tab.title, systemImage: tab.icon, value: tab.rawValue) {
 					TabEnum.view(for: tab)
 				}
 				.customizationID("tab.\(tab.rawValue)")
@@ -42,14 +43,14 @@ struct ExtendedTabbarView: View {
 			}
 			
 			TabSection("Sources") {
-				Tab(.localized("All Repositories"), systemImage: "globe.desk") {
+				Tab(.localized("All Repositories"), systemImage: "globe.desk", value: "all-repositories") {
 					NavigationStack {
 						SourceAppsView(object: Array(_sources), viewModel: viewModel)
 					}
 				}
 				
 				ForEach(_sources, id: \.identifier) { source in
-					Tab {
+					Tab(value: "source.\(source.objectID.uriRepresentation().absoluteString)") {
 						NavigationStack {
 							SourceAppsView(object: [source], viewModel: viewModel)
 						}
@@ -72,6 +73,7 @@ struct ExtendedTabbarView: View {
 			.hidden(horizontalSizeClass == .compact)
 		}
 		.tabViewStyle(.sidebarAdaptable)
+		.onChange(of: _selectedTab) { _ in FeatherHaptics.navigation() }
 		.tabViewCustomization($customization)
 		.sheet(isPresented: $_isAddingPresenting) {
 			SourcesAddView()

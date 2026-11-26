@@ -9,6 +9,7 @@ import CoreData
 import Foundation
 
 extension Notification.Name {
+	static let featherInstallApp = Notification.Name("Feather.installApp")
 	static let featherImportedAppDidFinish = Notification.Name(
 		"Feather.importedAppDidFinish"
 	)
@@ -16,6 +17,20 @@ extension Notification.Name {
 
 // MARK: - Class extension: Apps (Shared)
 extension Storage {
+	@MainActor
+	func saveNewApp(inserting records: () -> Void) throws {
+		let prior = context.insertedObjects
+		records()
+		let created = context.insertedObjects.subtracting(prior)
+		do {
+			try context.save()
+		} catch {
+			for object in created { context.delete(object) }
+			throw error
+		}
+		FeatherHaptics.action()
+	}
+
 	func getUuidDirectory(for app: AppInfoPresentable) -> URL? {
 		guard let uuid = app.uuid else { return nil }
 		return app.isSigned
@@ -39,6 +54,28 @@ extension Storage {
 			}
 			saveContext()
 		}
+	}
+
+	@MainActor
+	func finishInstall(_ app: AppInfoPresentable, protecting protectedIDs: Set<String>) {
+		let defaults = UserDefaults.standard
+		if let installed = app as? Signed, let identifier = installed.identifier, let version = installed.version {
+			let request = Signed.fetchRequest()
+			request.predicate = NSPredicate(format: "identifier == %@", identifier)
+			for copy in (try? context.fetch(request)) ?? [] {
+				guard copy.objectID != installed.objectID, let uuid = copy.uuid, !protectedIDs.contains(uuid),
+					let otherVersion = copy.version else { continue }
+				let key: String
+				switch otherVersion.compare(version, options: .numeric) {
+				case .orderedAscending: key = "Feather.deleteOlderSignedCopies"
+				case .orderedSame: key = "Feather.deleteEqualSignedCopies"
+				case .orderedDescending: key = "Feather.deleteNewerSignedCopies"
+				}
+				if defaults.bool(forKey: key) { deleteApp(for: copy) }
+			}
+			if defaults.bool(forKey: "Feather.deleteInstalledSignedCopy") { deleteApp(for: installed) }
+		}
+		if defaults.bool(forKey: "Feather.clearCacheAfterInstall") { ResetView.clearNetworkCache() }
 	}
 
 	func getCertificate(from app: AppInfoPresentable) -> CertificatePair? {

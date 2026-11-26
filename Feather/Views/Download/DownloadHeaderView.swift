@@ -41,7 +41,7 @@ struct DownloadHeaderView: View {
 }
 
 struct DownloadItemView: View {
-	let download: Download
+	@ObservedObject var download: Download
 	@State private var progress: Double = 0
 	@State private var bytesDownloaded: Int64 = 0
 	@State private var totalBytes: Int64 = 0
@@ -49,9 +49,27 @@ struct DownloadItemView: View {
 	
 	var body: some View {
 		VStack(alignment: .leading, spacing: 4) {
-			Text(download.fileName)
-				.font(.subheadline)
-				.lineLimit(1)
+			HStack {
+				Text(download.fileName)
+					.font(.subheadline)
+					.lineLimit(1)
+				Spacer()
+				if download.isImporting || download.progress < 1 {
+					Button {
+						DownloadManager.shared.setPaused(!download.isPaused, for: download)
+					} label: {
+						Image(systemName: download.isPaused ? "play.fill" : "pause.fill")
+					}
+					.accessibilityLabel(.localized(download.isPaused ? "Resume" : "Pause"))
+				}
+				Button(role: .destructive) {
+					DownloadManager.shared.cancelDownload(download)
+				} label: {
+					Image(systemName: "xmark.circle")
+				}
+				.accessibilityLabel(.localized("Cancel"))
+			}
+			.buttonStyle(.borderless)
 			
 			ProgressView(value: overallProgress)
 				.progressViewStyle(.linear)

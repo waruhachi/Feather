@@ -20,11 +20,35 @@ struct SourcesView: View {
 	@State private var _isAddingPresenting = false
 	@State private var _addingSourceLoading = false
 	@State private var _searchText = ""
+	@AppStorage("Feather.favoriteSources") private var _favoriteSourceData = Data()
 	
 	private var _filteredSources: [AltSource] {
 		_sources.filter { _searchText.isEmpty || ($0.name?.localizedCaseInsensitiveContains(_searchText) ?? false) }
 	}
 	
+	private var _favorites: Set<String> {
+		(try? JSONDecoder().decode(Set<String>.self, from: _favoriteSourceData)) ?? []
+	}
+
+	private func _sourceRow(_ source: AltSource) -> some View {
+		let identifier = source.identifier ?? ""
+		let favorite = _favorites.contains(identifier)
+		return NavigationLink {
+			SourceAppsView(object: [source], viewModel: viewModel)
+		} label: {
+			SourcesCellView(source: source)
+		}
+		.buttonStyle(.plain)
+		.contextMenu {
+			Button(.localized(favorite ? "Remove from Favorites" : "Add to Favorites"), systemImage: favorite ? "star.slash" : "star") {
+				guard !identifier.isEmpty else { return }
+				var updated = _favorites
+				if favorite { updated.remove(identifier) } else { updated.insert(identifier) }
+				_favoriteSourceData = (try? JSONEncoder().encode(updated)) ?? Data()
+			}
+		}
+	}
+
 	@FetchRequest(
 		entity: AltSource.entity(),
 		sortDescriptors: [NSSortDescriptor(keyPath: \AltSource.name, ascending: true)],
@@ -59,17 +83,16 @@ struct SourcesView: View {
 						.buttonStyle(.plain)
 					}
 					
-					NBSection(
-						.localized("Repositories"),
-						secondary: _filteredSources.count.description
-					) {
-						ForEach(_filteredSources) { source in
-							NavigationLink {
-								SourceAppsView(object: [source], viewModel: viewModel)
-							} label: {
-								SourcesCellView(source: source)
-							}
-							.buttonStyle(.plain)
+					let favorites = _filteredSources.filter { _favorites.contains($0.identifier ?? "") }
+					let otherSources = _filteredSources.filter { !_favorites.contains($0.identifier ?? "") }
+					if !favorites.isEmpty {
+						NBSection(.localized("Favorites"), secondary: favorites.count.description) {
+							ForEach(favorites, content: _sourceRow)
+						}
+					}
+					if !otherSources.isEmpty {
+						NBSection(.localized("Repositories"), secondary: otherSources.count.description) {
+							ForEach(otherSources, content: _sourceRow)
 						}
 					}
 				}

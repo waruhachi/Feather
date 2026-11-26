@@ -16,8 +16,8 @@ extension InstallerStatusViewModel {
 		case .ready: "app.gift"
 		case .sendingManifest, .sendingPayload: "paperplane.fill"
 		case .installing: "square.and.arrow.down"
-		case .completed: "app.badge.checkmark"
-		case .broken: "exclamationmark.triangle.fill"
+		case .completed(.success): "app.badge.checkmark"
+		case .completed(.failure), .broken: "exclamationmark.triangle.fill"
 		}
 	}
 	
@@ -28,8 +28,8 @@ extension InstallerStatusViewModel {
 		case .sendingManifest: .localized("Sending Manifest")
 		case .sendingPayload: .localized("Sending Payload")
 		case .installing: .localized("Installing")
-		case .completed: .localized("Completed")
-		case .broken: .localized("Error")
+		case .completed(.success): .localized("Completed")
+		case .completed(.failure), .broken: .localized("Error")
 		}
 	}
 }

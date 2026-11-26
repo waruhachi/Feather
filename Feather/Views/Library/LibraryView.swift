@@ -17,11 +17,20 @@ struct LibraryView: View {
 	@State private var _selectedInfoAppPresenting: AnyApp?
 	@State private var _selectedSigningAppPresenting: AnyApp?
 	@State private var _selectedInstallAppPresenting: AnyApp?
+	@State private var _pendingInstallApp: AnyApp?
 	@State private var _isImportingPresenting = false
+	@Environment(\.scenePhase) private var scenePhase
+	@AppStorage("Feather.openImportOnReopen") private var openImportOnReopen = false
+	@State private var wentToBackground = false
+	@State private var pendingImportAfterInstall = false
 	@State private var _isDownloadingPresenting = false
 	@State private var _alertDownloadString: String = ""  // for _isDownloadingPresenting
 	@State private var _updateCheckRotation = 0.0
 	@State private var _isUpdateCheckCompleteVisible = false
+	@State private var _work: LibraryWork?
+	@State private var _isInstallationSettingsPresented = false
+	@AppStorage("Feather.openImportOnLaunch") private var _openImportOnLaunch = false
+	@AppStorage("Feather.libraryImportAction") private var _importAction = LibraryImportAction.menu
 	@State private var _importUpdateCheckTask: Task<Void, Never>?
 
 	// MARK: Selection State
@@ -97,7 +106,8 @@ struct LibraryView: View {
 									$_selectedSigningAppPresenting,
 								selectedInstallAppPresenting:
 									$_selectedInstallAppPresenting,
-								selectedAppUUIDs: $_selectedAppUUIDs
+								selectedAppUUIDs: $_selectedAppUUIDs,
+								onChooseUpdate: { _presentWork(.updates, apps: [app]) }
 							)
 							.compatMatchedTransitionSource(
 								id: app.uuid ?? "",
@@ -124,7 +134,8 @@ struct LibraryView: View {
 									$_selectedSigningAppPresenting,
 								selectedInstallAppPresenting:
 									$_selectedInstallAppPresenting,
-								selectedAppUUIDs: $_selectedAppUUIDs
+								selectedAppUUIDs: $_selectedAppUUIDs,
+								onChooseUpdate: { _presentWork(.updates, apps: [app]) }
 							)
 							.compatMatchedTransitionSource(
 								id: app.uuid ?? "",
@@ -180,6 +191,21 @@ struct LibraryView: View {
 					) {
 						_bulkDeleteSelectedApps()
 					}
+					ToolbarItem(placement: .topBarTrailing) {
+						Menu {
+							Button(.localized("Batch Sign"), systemImage: "signature") {
+								_presentWork(.signing, apps: _selection)
+							}
+							if _selection.contains(where: \.isSigned) {
+								Button(.localized("Install Queue"), systemImage: "square.and.arrow.down") {
+									_presentWork(.installation, apps: _selection.filter(\.isSigned))
+								}
+							}
+						} label: {
+							Image(systemName: "ellipsis.circle")
+						}
+						.disabled(_selectedAppUUIDs.isEmpty)
+					}
 				} else {
 					ToolbarItem(placement: .topBarTrailing) {
 						Button {
@@ -206,25 +232,58 @@ struct LibraryView: View {
 						.accessibilityLabel(.localized("Check for Updates"))
 					}
 
-					NBToolbarMenu(
-						systemImage: "plus",
-						style: .icon,
-						placement: .topBarTrailing
-					) {
-						_importActions()
+					if !updateManager.updates.isEmpty {
+						ToolbarItem(placement: .topBarTrailing) {
+							Button {
+								_presentWork(.updates, apps: _updatableApps)
+							} label: {
+								Image(systemName: "arrow.down.circle")
+							}
+							.accessibilityLabel(.localized("Update All"))
+						}
+					}
+
+					ToolbarItem(placement: .topBarTrailing) {
+						_importToolbar()
 					}
 				}
 			}
 			.environment(\.editMode, $_editMode)
+			.sheet(item: $_work, onDismiss: _openPendingImport) { LibraryWorkView(work: $0) }
+			.onReceive(NotificationCenter.default.publisher(for: .featherImportAfterInstall)) { _ in
+				pendingImportAfterInstall = true
+			}
+			.onChange(of: scenePhase) { phase in
+				if phase == .background { wentToBackground = true }
+				guard phase == .active, wentToBackground else { return }
+				wentToBackground = false
+				if openImportOnReopen && _selectedInstallAppPresenting == nil && _work == nil && _selectedSigningAppPresenting == nil {
+					_isImportingPresenting = true
+				}
+			}
+			.sheet(isPresented: $_isInstallationSettingsPresented) {
+				NBNavigationView(.localized("Installation"), displayMode: .inline) { InstallationView() }
+			}
+			.onAppear {
+				if _openImportOnLaunch && !LibraryLaunchState.didOpenPicker {
+					LibraryLaunchState.didOpenPicker = true
+					_isImportingPresenting = true
+				}
+			}
 			.sheet(item: $_selectedInfoAppPresenting) { app in
 				LibraryInfoView(app: app.base)
 			}
-			.sheet(item: $_selectedInstallAppPresenting) { app in
+			.sheet(item: $_selectedInstallAppPresenting, onDismiss: _openPendingImport) { app in
 				InstallPreviewView(app: app.base, isSharing: app.archive)
 					.presentationDetents([.height(200)])
 					.presentationDragIndicator(.visible)
 			}
-			.fullScreenCover(item: $_selectedSigningAppPresenting) { app in
+			.fullScreenCover(item: $_selectedSigningAppPresenting, onDismiss: {
+				if let pending = _pendingInstallApp {
+					_pendingInstallApp = nil
+					_selectedInstallAppPresenting = pending
+				}
+			}) { app in
 				SigningView(app: app.base)
 					.compatNavigationTransition(
 						id: app.base.uuid ?? "",
@@ -277,15 +336,11 @@ struct LibraryView: View {
 					}
 				}
 			}
-			.onReceive(
-				NotificationCenter.default.publisher(
-					for: Notification.Name("Feather.installApp")
-				)
-			) { _ in
-				if let latest = _signedApps.first {
-					_selectedInstallAppPresenting = AnyApp(base: latest)
-				}
+			.onReceive(NotificationCenter.default.publisher(for: .featherInstallApp)) { notification in
+				guard let uuid = notification.object as? String, let signed = _signedApps.first(where: { $0.uuid == uuid }) else { return }
+				_pendingInstallApp = AnyApp(base: signed)
 			}
+
 			.onReceive(
 				NotificationCenter.default.publisher(
 					for: .featherImportedAppDidFinish
@@ -312,6 +367,49 @@ struct LibraryView: View {
 // MARK: - Extension: View
 extension LibraryView {
 	@ViewBuilder
+	private func _importToolbar() -> some View {
+		if _importAction == .menu {
+			Menu {
+				_importActions()
+				_importPreferences()
+			} label: {
+				Image(systemName: "plus")
+					.accessibilityLabel(.localized("Import"))
+			}
+		} else {
+			Button {
+				FeatherHaptics.action()
+				if _importAction == .files {
+					_isImportingPresenting = true
+				} else {
+					_isDownloadingPresenting = true
+				}
+			} label: {
+				Image(systemName: "plus")
+					.accessibilityLabel(.localized(_importAction.title))
+			}
+			.contextMenu {
+				_importActions()
+				_importPreferences()
+			}
+		}
+	}
+
+	@ViewBuilder
+	private func _importPreferences() -> some View {
+		Menu(.localized("Default Import Action"), systemImage: "pin") {
+			Picker(.localized("Default Import Action"), selection: $_importAction) {
+				ForEach(LibraryImportAction.allCases, id: \.self) { action in
+					Text(.localized(action.title)).tag(action)
+				}
+			}
+		}
+		Button(.localized("Installation"), systemImage: "gear") {
+			_isInstallationSettingsPresented = true
+		}
+	}
+
+	@ViewBuilder
 	private func _importActions() -> some View {
 		Button(.localized("Import from Files"), systemImage: "folder") {
 			_isImportingPresenting = true
@@ -324,6 +422,30 @@ extension LibraryView {
 
 // MARK: - Extension: Bulk Delete
 extension LibraryView {
+	private var _selection: [AppInfoPresentable] {
+		_getAllApps().filter { $0.uuid.map(_selectedAppUUIDs.contains) == true }
+	}
+
+	private var _updatableApps: [AppInfoPresentable] {
+		var signedIDs = Set<String>()
+		let signed = _signedApps.filter { app in
+			guard let identity = app.identifier ?? app.uuid,
+				signedIDs.insert(identity).inserted
+			else { return false }
+			return updateManager.update(for: app) != nil
+		}
+		let signedOriginalIDs = Set(signed.compactMap { updateManager.update(for: $0)?.bundleIdentifier })
+		let imported = _importedApps.filter { app in
+			guard let update = updateManager.update(for: app) else { return false }
+			return !signedOriginalIDs.contains(update.bundleIdentifier)
+		}
+		return signed.map { $0 as AppInfoPresentable } + imported.map { $0 as AppInfoPresentable }
+	}
+
+	private func _presentWork(_ purpose: LibraryWork.Purpose, apps: [AppInfoPresentable]) {
+		_work = LibraryWork(purpose: purpose, apps: apps, sources: Array(_sources))
+	}
+
 	private func _bulkDeleteSelectedApps() {
 		let selectedApps = _getAllApps().filter { app in
 			guard let uuid = app.uuid else { return false }
@@ -337,6 +459,12 @@ extension LibraryView {
 		_selectedAppUUIDs.removeAll()
 
 		// _editMode = .inactive
+	}
+
+	private func _openPendingImport() {
+		guard pendingImportAfterInstall else { return }
+		pendingImportAfterInstall = false
+		_isImportingPresenting = true
 	}
 
 	private func _getAllApps() -> [AppInfoPresentable] {
@@ -429,4 +557,9 @@ extension LibraryView {
 			}
 		}
 	}
+}
+
+@MainActor
+private enum LibraryLaunchState {
+	static var didOpenPicker = false
 }

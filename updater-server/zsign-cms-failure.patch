@@ -1,0 +1,11 @@
+--- a/src/archo.cpp
++++ b/src/archo.cpp
+@@ -465 +465,3 @@
+-		ZSign::SlotBuildCMSSignature(pSignAsset, strCodeDirectorySlot, strAltnateCodeDirectorySlot, strCMSSignatureSlot);
++		if (!ZSign::SlotBuildCMSSignature(pSignAsset, strCodeDirectorySlot, strAltnateCodeDirectorySlot, strCMSSignatureSlot)) {
++			return false;
++		}
+@@ -592,2 +594 @@
+-	BuildCodeSignature(pSignAsset, bForce, strBundleId, strInfoSHA1, strInfoSHA256, strCodeResourcesSHA1, strCodeResourcesSHA256, strCodeSignBlob);
+-	if (strCodeSignBlob.empty()) {
++	if (!BuildCodeSignature(pSignAsset, bForce, strBundleId, strInfoSHA1, strInfoSHA256, strCodeResourcesSHA1, strCodeResourcesSHA256, strCodeSignBlob) || strCodeSignBlob.empty()) {
