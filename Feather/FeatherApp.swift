@@ -38,6 +38,14 @@ struct FeatherApp: App {
 				if UIApplication.shared.applicationState == .active { downloadManager.importPendingDownloads() }
 			}
 			.task { await InstallTLSCertificates.shared.refreshIfNeeded() }
+			#if !targetEnvironment(macCatalyst)
+			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+				Task { await ScheduledLibraryUpdates.checkIfDue() }
+			}
+			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+				ScheduledLibraryUpdates.schedule()
+			}
+			#endif
 			.onReceive(NotificationCenter.default.publisher(for: .heartbeatInvalidHost)) { _ in
 				DispatchQueue.main.async {
 					UIAlertController.showAlertWithOk(
@@ -164,6 +172,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 		_ application: UIApplication,
 		didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
 	) -> Bool {
+		#if !targetEnvironment(macCatalyst)
+		ScheduledLibraryUpdates.register()
+		#endif
 		_createPipeline()
 		_createDocumentsDirectories()
 		ResetView.clearWorkCache()

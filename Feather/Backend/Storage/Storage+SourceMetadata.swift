@@ -16,7 +16,7 @@ enum IPAOriginKind: String, Codable {
 	case unknown
 }
 
-enum UpdateProviderKind: String {
+enum UpdateProviderKind: String, Codable {
 	case featherSource
 	case appStore
 	case github

@@ -73,6 +73,9 @@ struct SettingsView: View {
 						NavigationLink(destination: HostedSelfUpdateView()) {
 							Label(.localized("Feather Updates"), systemImage: "arrow.down.app")
 						}
+						NavigationLink(destination: LibraryUpdateSettingsView()) {
+							Label(.localized("Library Updates"), systemImage: "arrow.triangle.2.circlepath")
+						}
 					#endif
 					NavigationLink(destination: WorkflowPreferencesView()) {
 						Label(.localized("Workflow"), systemImage: "slider.horizontal.3")

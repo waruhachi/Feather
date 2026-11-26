@@ -8,9 +8,8 @@
 import AltSourceKit
 import CoreData
 import Foundation
-import NimbleJSON
 
-struct AppUpdate: Identifiable, Equatable {
+struct AppUpdate: Identifiable, Equatable, Codable {
 	let id: String
 	let localUUID: String
 	let localVersion: String?
@@ -33,16 +32,37 @@ struct AppUpdate: Identifiable, Equatable {
 final class UpdateManager: ObservableObject {
 	static let shared = UpdateManager()
 
-	typealias RepositoryDataHandler = Result<ASRepository, Error>
+	private static let snapshotKey = "Feather.libraryUpdateSnapshot"
 
-	@Published private(set) var updates: [String: AppUpdate] = [:]
+	private struct Snapshot: Codable {
+		let date: Date
+		let updates: [String: AppUpdate]
+	}
+
+	@Published private(set) var updates: [String: AppUpdate] = [:] {
+		didSet { saveSnapshot() }
+	}
 	@Published private(set) var isChecking = false
 	@Published private(set) var lastCheckedDate: Date?
 
-	private let _dataService = NBFetchService()
 	private let _jsonDecoder = JSONDecoder()
 
-	private init() {}
+	private init() {
+		if let data = UserDefaults.standard.data(forKey: Self.snapshotKey),
+			let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
+			Date().timeIntervalSince(snapshot.date) < 2 * 86400
+		{
+			lastCheckedDate = snapshot.date
+			updates = snapshot.updates
+		}
+	}
+
+	private func saveSnapshot() {
+		guard let date = lastCheckedDate,
+			let data = try? JSONEncoder().encode(Snapshot(date: date, updates: updates))
+		else { return }
+		UserDefaults.standard.set(data, forKey: Self.snapshotKey)
+	}
 
 	func update(for app: AppInfoPresentable) -> AppUpdate? {
 		guard let uuid = app.uuid else { return nil }
@@ -149,23 +169,27 @@ final class UpdateManager: ObservableObject {
 		}
 	}
 
+	@discardableResult
 	func checkForUpdates(
 		sources: [AltSource],
 		localApps: [AppInfoPresentable]
-	) async {
-		guard !isChecking else { return }
+	) async -> Bool {
+		guard !isChecking, !Task.isCancelled else { return false }
 
 		isChecking = true
-		defer {
-			isChecking = false
-			lastCheckedDate = Date()
-		}
+		defer { isChecking = false }
 
 		let repositories = await _fetchRepositories(from: sources)
-		updates = await _findUpdates(
-			repositories: repositories,
-			localApps: localApps
-		)
+		guard !Task.isCancelled else { return false }
+		let found = await _findUpdates(repositories: repositories, localApps: localApps)
+		guard !Task.isCancelled else { return false }
+
+		lastCheckedDate = Date()
+		updates = found.filter { uuid, update in
+			let metadata = Storage.shared.sourceMetadata(for: uuid)
+			return metadata?.updatesDisabled != true && metadata?.skippedUpdateVersionID != update.versionID
+		}
+		return true
 	}
 
 	private func _fetchRepositories(from sources: [AltSource]) async -> [(
@@ -174,6 +198,7 @@ final class UpdateManager: ObservableObject {
 		var repositories: [(AltSource, ASRepository)] = []
 
 		for source in sources {
+			guard !Task.isCancelled else { break }
 			guard let url = source.sourceURL else {
 				continue
 			}
@@ -189,16 +214,11 @@ final class UpdateManager: ObservableObject {
 	}
 
 	private func _fetchRepository(from url: URL) async -> ASRepository? {
-		await withCheckedContinuation { continuation in
-			_dataService.fetch(from: url) { (result: RepositoryDataHandler) in
-				switch result {
-				case .success(let repository):
-					continuation.resume(returning: repository)
-				case .failure:
-					continuation.resume(returning: nil)
-				}
-			}
-		}
+		guard let (data, response) = try? await URLSession.shared.data(from: url),
+			let http = response as? HTTPURLResponse,
+			(200...299).contains(http.statusCode)
+		else { return nil }
+		return try? _jsonDecoder.decode(ASRepository.self, from: data)
 	}
 
 	private func _findUpdates(
@@ -225,6 +245,7 @@ final class UpdateManager: ObservableObject {
 		}
 
 		for localApp in localApps {
+			guard !Task.isCancelled else { break }
 			guard let localUUID = localApp.uuid else {
 				continue
 			}
