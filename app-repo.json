@@ -16,8 +16,15 @@
         {
           "version": "2.11.1",
           "date": "2026-11-27T19:47:43Z",
-          "size": 20488064,
+          "size": 20500708,
           "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.11.1/Feather.ipa",
+          "localizedDescription": "Import shared IPA and TIPA files and fix installation failures caused by malformed Mach-O runpaths during tweak injection."
+        },
+        {
+          "version": "2.11.0",
+          "date": "2026-11-27T06:19:55Z",
+          "size": 20488064,
+          "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.11.0/Feather.ipa",
           "localizedDescription": "Variant-aware source updates, SHA-256 verification, streamed paired installs, Apple ID extension profiles, and new backup and migration tools."
         },
         {
@@ -36,7 +43,7 @@
       ],
       "version": "2.11.1",
       "versionDate": "2026-11-27T19:47:43Z",
-      "size": 20488064,
+      "size": 20500708,
       "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.11.1/Feather.ipa"
     }
   ],
