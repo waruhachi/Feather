@@ -1,3 +1,35 @@
+diff --git a/src/archo.cpp b/src/archo.cpp
+index 02537fc..a6bf088 100644
+--- a/src/archo.cpp
++++ b/src/archo.cpp
+@@ -762,9 +762,10 @@ bool ZArchO::AddRPath(const char *szRPath) {
+ 		pLoadCommand += BO(plc->cmdsize);
+ 	}
+ 
+-	uint32_t uRPathLength = (uint32_t)strlen(szRPath);
+-	uint32_t uRPathPadding = (8 - uRPathLength % 8) % 8;
+-	uint32_t uRPathCommandSize = sizeof(rpath_command) + uRPathLength + uRPathPadding;
++	const uint32_t alignment = m_b64Bit ? 8 : 4;
++	const uint32_t pathSize = (uint32_t)strlen(szRPath) + 1;
++	const uint32_t unalignedSize = sizeof(rpath_command) + pathSize;
++	const uint32_t uRPathCommandSize = (unalignedSize + alignment - 1) & ~(alignment - 1);
+ 	if (m_uLoadCommandsFreeSpace > 0 && m_uLoadCommandsFreeSpace < uRPathCommandSize) {
+ 		ZLog::Error(">>> Can't find free space of LoadCommands for LC_RPATH!\n");
+ 		return false;
+@@ -775,11 +776,9 @@ bool ZArchO::AddRPath(const char *szRPath) {
+ 	rc->cmdsize = BO(uRPathCommandSize);
+ 	rc->path.offset = BO((uint32_t)sizeof(rpath_command));
+ 
+-	string strRPath = szRPath;
+-	strRPath.append(uRPathPadding, 0);
+-
+ 	uint8_t* pRPath = (uint8_t*)rc + sizeof(rpath_command);
+-	memcpy(pRPath, strRPath.data(), strRPath.size());
++	memcpy(pRPath, szRPath, pathSize);
++	memset(pRPath + pathSize, 0, uRPathCommandSize - unalignedSize);
+ 
+ 	m_pHeader->ncmds = BO(BO(m_pHeader->ncmds) + 1);
+ 	m_pHeader->sizeofcmds = BO(BO(m_pHeader->sizeofcmds) + uRPathCommandSize);
 diff --git a/src/bundle.cpp b/src/bundle.cpp
 index 9553e00..54281c4 100644
 --- a/src/bundle.cpp
