@@ -10,7 +10,7 @@ final class AppleIDProvisioning: ObservableObject {
 	static let shared = AppleIDProvisioning()
 	static let deviceKey = "Feather.appleID.deviceUDID"
 	static let serverKey = "Feather.appleID.anisetteServer"
-	static let defaultServer = "https://ani.sidestore.io"
+	static let defaultServer = "https://ani.sidestore.zip"
 
 	struct AccountSession: Codable {
 		let authentication: AuthSession
