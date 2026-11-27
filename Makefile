@@ -4,10 +4,8 @@ PLATFORMS := iphoneos maccatalyst
 
 TMP := $(TMPDIR)/$(NAME)
 TRANSPORT_CACHE := $(TMP)/transport
-CERT_JSON_URL := https://ryuksign-install.ryuksign.workers.dev/pack.json
-
 .NOTPARALLEL:
-.PHONY: all clean deps transport $(PLATFORMS)
+.PHONY: all clean transport $(PLATFORMS)
 
 all: $(PLATFORMS)
 
@@ -16,16 +14,12 @@ clean:
 	rm -rf packages
 	rm -rf Payload
 
-deps:
-	python3 tools/refresh_install_tls.py --url "$(CERT_JSON_URL)" --output deps
-
-
 transport:
 	python3 tools/idevice-transport/build.py --cache "$(TRANSPORT_CACHE)"
 
 iphoneos: transport
 
-$(PLATFORMS): deps
+$(PLATFORMS):
 	rm -rf _build
 
 	@if [ "$@" = "iphoneos" ]; then \
@@ -50,9 +44,6 @@ $(PLATFORMS): deps
 	mkdir -p _build/Payload
 	cp -R _build/Applications/*.app _build/Payload/Feather.app
 	chmod -R 0755 _build/Payload/Feather.app
-	@resources="_build/Payload/Feather.app"; \
-	if [ "$@" = "maccatalyst" ]; then resources="$$resources/Contents/Resources"; fi; \
-	cp deps/* "$$resources/"
 	@for extension in _build/Payload/Feather.app/PlugIns/*.appex; do \
 		if [ -d "$$extension" ]; then codesign --force --sign - --timestamp=none "$$extension" || exit $$?; fi; \
 	done
