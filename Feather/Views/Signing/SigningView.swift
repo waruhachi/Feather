@@ -53,9 +53,11 @@ struct SigningView: View {
 	
 	var app: AppInfoPresentable
 	var onSigned: ((String) -> Void)?
+	private let injectAndExport: Bool
 	
-	init(app: AppInfoPresentable, onSigned: ((String) -> Void)? = nil) {
+	init(app: AppInfoPresentable, injectAndExport: Bool = false, onSigned: ((String) -> Void)? = nil) {
 		self.app = app
+		self.injectAndExport = injectAndExport
 		self.onSigned = onSigned
 		let storedCert = UserDefaults.standard.integer(forKey: "feather.selectedCert")
 		__temporaryCertificate = State(initialValue: storedCert)
@@ -65,9 +67,22 @@ struct SigningView: View {
 	var body: some View {
 		NBNavigationView("", displayMode: .inline) {
 			Form {
-				_customizationOptions(for: app)
-				_cert()
-				_customizationProperties(for: app)
+				if injectAndExport {
+					Section(.localized("Inject Tweaks & Export")) {
+						Text(app.name ?? .localized("Application"))
+						NavigationLink(.localized("Choose Tweaks")) {
+							SigningTweaksView(options: $_temporaryOptions, bundleIdentifier: app.identifier)
+						}
+						let count = _temporaryOptions.injectionFiles.count + _temporaryOptions.injectionFrameworks.count
+							+ _temporaryOptions.injectedAppExtensions.count
+						Text(verbatim: .localized("%lld selected", arguments: count))
+					}
+					_cert()
+				} else {
+					_customizationOptions(for: app)
+					_cert()
+					_customizationProperties(for: app)
+				}
 				
 				// horrible
 				Rectangle()
@@ -85,7 +100,7 @@ struct SigningView: View {
 							Button {
 								_start()
 							} label: {
-								NBSheetButton(title: .localized(_isSigning ? "Signing" : "Start Signing"), style: .prominent)
+								NBSheetButton(title: .localized(_isSigning ? "Signing" : (injectAndExport ? "Sign & Export IPA" : "Start Signing")), style: .prominent)
 									.padding()
 							}
 							.buttonStyle(.plain)
@@ -219,7 +234,7 @@ extension SigningView {
 			if appleID.account != nil && _temporaryOptions.signingOption == .default {
 				Toggle(.localized("Use Apple ID"), isOn: $useAppleID)
 				if usesAppleID {
-					Text(.localized("Feather removes app extensions from the signed copy when using an Apple ID profile."))
+					Text(.localized("Feather provisions extensions separately. Extensions count toward your Apple Developer team’s App ID limit."))
 						.font(.caption).foregroundStyle(.secondary)
 				}
 			}
@@ -231,6 +246,19 @@ extension SigningView {
 					CertificatesCellView(
 						cert: cert
 					)
+				}
+				if _temporaryOptions.signingOption == .default {
+					let activeIdentifier = SigningPreflight.bundleIdentifier(for: app, options: _temporaryOptions)
+					let alternatives = Set(Storage.shared.signingProfiles(for: cert).compactMap { profile in
+						profile.profile.ExpirationDate > Date() ? profile.explicitBundleIdentifier : nil
+					}).subtracting([activeIdentifier].compactMap { $0 }).sorted()
+					if !alternatives.isEmpty {
+						Menu(.localized("Use Bundle Identifier from Profile")) {
+							ForEach(alternatives, id: \.self) { identifier in
+								Button(identifier) { _temporaryOptions.appIdentifier = identifier }
+							}
+						}
+					}
 				}
 			} else if !usesAppleID {
 				NavigationLink(.localized("Select Certificate")) {
@@ -310,7 +338,7 @@ extension SigningView {
 				}
 				NavigationLink(.localized("Tweaks")) {
 					SigningTweaksView(
-						options: $_temporaryOptions
+						options: $_temporaryOptions, bundleIdentifier: app.identifier
 					)
 				}
 			}
@@ -361,6 +389,16 @@ extension SigningView {
 	}
 
 	private func _start() {
+		if injectAndExport {
+			guard !_temporaryOptions.injectionFiles.isEmpty || !_temporaryOptions.injectionFrameworks.isEmpty
+				|| !_temporaryOptions.injectedAppExtensions.isEmpty
+			else {
+				UIAlertController.showAlertWithOk(title: .localized("Choose Tweaks"), message: .localized("Select at least one tweak or extension to include."))
+				return
+			}
+			_temporaryOptions.signingOption = .default
+			_temporaryOptions.post_deleteAppAfterSigned = false
+		}
 		guard
 			_selectedCert() != nil || usesAppleID || _temporaryOptions.signingOption != .default
 		else {
@@ -431,15 +469,15 @@ extension SigningView {
 			defer { _isSigning = false }
 			do {
 				var certificate = _selectedCert()
-				var options = _temporaryOptions
+				let options = _temporaryOptions
 				#if os(iOS) && !targetEnvironment(macCatalyst)
 				if usesAppleID, let identifier = SigningPreflight.bundleIdentifier(for: app, options: options) {
 					certificate = try await appleID.prepare(bundleID: identifier, name: options.appName ?? app.name ?? identifier)
-					options.injectedAppExtensions = []
-					options.removeFiles.append(contentsOf: ["PlugIns", "Extensions"])
 				}
 				#endif
-				let signedUUID = try await FR.signPackage(app, using: options, icon: appIcon, certificate: certificate)
+				let signedUUID = try await FR.signPackage(
+					app, using: options, icon: appIcon, certificate: certificate, provisionWithAppleID: usesAppleID
+				)
 				if _rememberRecipe, _temporaryOptions.signingOption == .default,
 					let target = SigningPreflight.bundleIdentifier(for: app, options: _temporaryOptions)
 				{
@@ -472,7 +510,7 @@ extension SigningView {
 		if let onSigned {
 			onSigned(uuid)
 		} else if _temporaryOptions.post_installAppAfterSigned {
-			NotificationCenter.default.post(name: .featherInstallApp, object: uuid)
+			InstallShortcut.start(for: uuid)
 		}
 	}
 

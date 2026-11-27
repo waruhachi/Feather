@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct FeatherBackupView: View {
 	@State private var password = ""
+	@State private var components = Set(FeatherBackup.Component.allCases)
 	@State private var backup: BackupDocument?
 	@State private var exporting = false
 	@State private var importing = false
@@ -12,17 +13,31 @@ struct FeatherBackupView: View {
 
 	var body: some View {
 		NBList(.localized("Backup & Restore")) {
+			NavigationLink(.localized("Documents Migration")) {
+				DocumentsMigrationView()
+			}
+			Section(.localized("Components")) {
+				ForEach(FeatherBackup.Component.allCases, id: \.self) { component in
+					Toggle(component.title, isOn: Binding(
+						get: { components.contains(component) },
+						set: { selected in
+							if selected { components.insert(component) } else { components.remove(component) }
+						}
+					))
+				}
+			}
+			.disabled(working)
 			Section {
 				SecureField(.localized("Backup Password"), text: $password)
 					.textContentType(.password)
 				Button(.localized("Create Backup"), systemImage: "externaldrive.badge.plus", action: exportBackup)
-					.disabled(working || password.count < 8)
+					.disabled(working || password.count < 8 || components.isEmpty)
 				Button(.localized("Restore Backup"), systemImage: "externaldrive.badge.arrow.down") { importing = true }
-					.disabled(working || password.isEmpty)
+					.disabled(working || password.isEmpty || components.isEmpty)
 				if working { ProgressView() }
 				if let message { Text(message).foregroundStyle(.secondary) }
 			} footer: {
-				Text(.localized("Encrypted backups contain certificates, sources, saved tweaks, and preferences. Restore adds missing items and applies the saved preferences. Apps and pairing records are excluded."))
+				Text(.localized("Choose what to include in an encrypted backup or restore from a file. Restore adds missing items and applies selected preferences."))
 			}
 		}
 		.fileExporter(isPresented: $exporting, document: backup, contentType: BackupDocument.backupType, defaultFilename: "Feather") { result in
@@ -33,11 +48,12 @@ struct FeatherBackupView: View {
 			switch result {
 			case .success(let file):
 				let password = self.password
+				let components = self.components
 				working = true
 				Task {
 					defer { working = false }
 					do {
-						let problems = try await FeatherBackup.restore(file: file, password: password)
+						let problems = try await FeatherBackup.restore(file: file, password: password, components: components)
 						message = problems.isEmpty ? .localized("Backup Restored") : problems.joined(separator: "\n")
 					} catch { message = error.localizedDescription }
 				}
@@ -49,12 +65,13 @@ struct FeatherBackupView: View {
 
 	private func exportBackup() {
 		let password = self.password
+		let components = self.components
 		working = true
 		message = nil
 		Task {
 			defer { working = false }
 			do {
-				backup = BackupDocument(data: try await FeatherBackup.export(password: password))
+				backup = BackupDocument(data: try await FeatherBackup.export(password: password, components: components))
 				exporting = true
 			} catch { message = error.localizedDescription }
 		}

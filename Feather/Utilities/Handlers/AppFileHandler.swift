@@ -19,19 +19,22 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 	private let _download: Download?
 	private let _sourceProvenance: SourceAppProvenance?
 	private let _importOrigin: IPAImportOrigin
+	private let expectedBundleIdentifier: String?
 
 	init(
 		file ipa: URL,
 		install: Bool = false,
 		download: Download? = nil,
 		sourceProvenance: SourceAppProvenance? = nil,
-		importOrigin: IPAImportOrigin? = nil
+		importOrigin: IPAImportOrigin? = nil,
+		expectedBundleIdentifier: String? = nil
 	) {
 		self.uuid = download?.transferID.uuidString ?? UUID().uuidString
 		self._ipa = ipa
 		self._install = install
 		self._download = download
 		self._sourceProvenance = sourceProvenance ?? download?.sourceProvenance
+		self.expectedBundleIdentifier = expectedBundleIdentifier
 		self._importOrigin =
 			sourceProvenance.map {
 				.featherSource($0.sourceRepositoryURL)
@@ -52,6 +55,9 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 
 		try _fileManager.copyItem(at: _ipa, to: destinationURL)
 		_ipa = destinationURL
+		if let checksum = _sourceProvenance?.expectedSHA256 {
+			try IPAChecksum.verify(destinationURL, expected: checksum)
+		}
 	}
 
 	func extract() async throws {
@@ -125,6 +131,10 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 		}
 
 		let bundle = Bundle(url: appUrl)
+		if let expectedBundleIdentifier, bundle?.bundleIdentifier != expectedBundleIdentifier {
+			try? _fileManager.removeItem(at: app)
+			throw ImportedFileHandlerError.unexpectedBundleIdentifier
+		}
 
 		let storage = Storage.shared
 		do {
@@ -177,6 +187,14 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 	}
 }
 
-private enum ImportedFileHandlerError: Error {
+private enum ImportedFileHandlerError: LocalizedError {
 	case payloadNotFound
+	case unexpectedBundleIdentifier
+
+	var errorDescription: String? {
+		switch self {
+		case .payloadNotFound: .localized("The IPA does not contain an application.")
+		case .unexpectedBundleIdentifier: .localized("The IPA’s bundle identifier does not match the store listing.")
+		}
+	}
 }

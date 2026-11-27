@@ -28,6 +28,7 @@ struct InstallPreviewView: View {
 	@AppStorage("Feather.dismissInstallAfterFinish") private var dismissAfterFinish = false
 	@AppStorage("Feather.openImportAfterInstall") private var openImportAfterInstall = false
 	
+	private let appUUID: String?
 	var app: AppInfoPresentable
 	var onOutcome: ((String) -> Void)?
 	var onVerifiedInstall: (() -> Void)?
@@ -45,6 +46,7 @@ struct InstallPreviewView: View {
 		self.onTransferStarted = onTransferStarted
 		self.protectedCopies = protectedCopies
 		self.app = app
+		self.appUUID = app.uuid
 		self.isSharing = isSharing
 		let viewModel = InstallerStatusViewModel(isIdevice: UserDefaults.standard.integer(forKey: "Feather.installationMethod") == 1)
 		self._viewModel = StateObject(wrappedValue: viewModel)
@@ -119,6 +121,7 @@ struct InstallPreviewView: View {
 		#endif
 		
 		.onDisappear {
+			InstallShortcut.finish(for: appUUID, verified: false)
 			endActivity(.cancelled)
 			installTask?.cancel()
 			installTask = nil
@@ -251,6 +254,7 @@ struct InstallPreviewView: View {
 
 	private func finish(_ message: String, completed: Bool, verified: Bool = false) {
 		guard !didFinish else { return }
+		InstallShortcut.finish(for: appUUID, verified: verified)
 		didFinish = true
 		endActivity(completed ? (verified ? .installed : .unconfirmed) : .failed)
 		progressTask?.cancel()

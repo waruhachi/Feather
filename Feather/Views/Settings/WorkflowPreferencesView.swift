@@ -37,6 +37,8 @@ struct WorkflowPreferencesView: View {
 	@AppStorage("Feather.resultHaptics") private var resultHaptics = true
 	@AppStorage("Feather.openImportOnLaunch") private var openImportOnLaunch = false
 	@AppStorage("Feather.openImportOnReopen") private var openImportOnReopen = false
+	@AppStorage(ImportSigning.preferenceKey) private var signImports = false
+	@AppStorage(InstallShortcut.preferenceKey) private var installShortcut = ""
 	@AppStorage("Feather.dismissInstallAfterFinish") private var dismissInstallAfterFinish = false
 	@AppStorage("Feather.openImportAfterInstall") private var openImportAfterInstall = false
 	@AppStorage("Feather.libraryImportAction") private var importAction = LibraryImportAction.menu
@@ -51,10 +53,17 @@ struct WorkflowPreferencesView: View {
 				}
 				Toggle(.localized("Open IPA Picker on Launch"), isOn: $openImportOnLaunch)
 				Toggle(.localized("Open IPA Picker on Reopen"), isOn: $openImportOnReopen)
+				Toggle(.localized("Auto-Sign Imports with Saved Settings"), isOn: $signImports)
 			}
 			Section(.localized("Installation")) {
 				Toggle(.localized("Dismiss Install Panel After Finishing"), isOn: $dismissInstallAfterFinish)
 				Toggle(.localized("Open IPA Picker After Installing"), isOn: $openImportAfterInstall)
+			}
+			Section {
+				TextField(.localized("Install Shortcut Name"), text: $installShortcut)
+					.autocorrectionDisabled()
+			} footer: {
+				Text(.localized("Optional. When you sign and install an app, Feather runs this shortcut with Installation as input. After a verified install, Feather runs it again with Installed."))
 			}
 			Section(.localized("Haptics")) {
 				Toggle(.localized("Navigation"), isOn: $navigationHaptics)

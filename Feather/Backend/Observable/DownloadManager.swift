@@ -190,6 +190,7 @@ class DownloadManager: NSObject, ObservableObject {
 			$0.url == url
 				&& $0.sourceProvenance?.sourceVersionID
 					== sourceProvenance?.sourceVersionID
+				&& $0.sourceProvenance?.expectedSHA256 == sourceProvenance?.expectedSHA256
 				&& $0.importOrigin == requestedOrigin
 				&& $0.updateFromUUID == updateFromUUID
 		}) {
@@ -333,6 +334,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
 			do {
 				let uuid = try await FR.importPackage(url, download: dl)
 				finish(dl, result: .success(uuid))
+				if dl.updateFromUUID == nil { ImportSigning.enqueue(uuid) }
 			} catch {
 				if !(error is CancellationError) {
 					FeatherHaptics.result(.error)

@@ -24,7 +24,7 @@ struct LibraryUpdateSettingsView: View {
 			Section {
 				Toggle(.localized("Install Paired Updates Automatically"), isOn: $automaticInstall)
 			} footer: {
-				Text(.localized("Enable automatic updates for individual signed apps in Library. Feather updates only installed apps with the same signing identity when a pairing connection is available. iOS controls when background work runs."))
+				Text(.localized("Enable automatic updates for a source in Sources or for an individual signed app in Library. An app’s setting overrides its source. Feather updates only installed apps with the same signing identity when a pairing connection is available. iOS controls when background work runs."))
 			}
 			Section {
 				Toggle(.localized("Update Notifications"), isOn: $updateAlerts)

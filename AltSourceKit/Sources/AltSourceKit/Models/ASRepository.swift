@@ -162,6 +162,7 @@ extension ASRepository {
 		public var versionDescription: String?
 
 		public var downloadURL: URL?
+		public var sha256: String?
 
 		public var localizedDescription: String?
 
@@ -251,6 +252,7 @@ extension ASRepository {
 			)
 
 			self.downloadURL = try container.decodeIfPresent(URL.self, forKey: .downloadURL)
+			self.sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
 
 			self.localizedDescription =
 				try container.decodeIfPresent(
@@ -347,7 +349,7 @@ extension ASRepository {
 			case id = "bundleIdentifier"
 			case name, subtitle, description
 			case developer = "developerName"
-			case versions, version, versionDate, date, versionDescription, downloadURL,
+			case versions, version, versionDate, date, versionDescription, downloadURL, sha256,
 			     localizedDescription, iconURL, tintColor, size, category, beta
 			case permissions, appPermissions
 			case screenshots, screenshotURLs
@@ -398,6 +400,7 @@ extension ASRepository {
 			public var date: DateParsed?
 			public var localizedDescription: String?
 			public var downloadURL: URL?
+			public var sha256: String?
 			public var size: UInt?
 			public var minOSVersion: OSVersion?
 
@@ -421,6 +424,7 @@ extension ASRepository {
 					URL.self,
 					forKey: .downloadURL
 				)
+				self.sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
 				self.size =
 					(try? container.decodeIfPresent(UInt.self, forKey: .size))
 						?? (try? container.decodeIfPresent(String.self, forKey: .size))
@@ -439,7 +443,7 @@ extension ASRepository {
 			public enum CodingKeys: String, CodingKey {
 				case version
 				case build = "buildVersion"
-				case date, localizedDescription, downloadURL, size, minOSVersion
+				case date, localizedDescription, downloadURL, size, minOSVersion, sha256
 			}
 		}
 	}

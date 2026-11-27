@@ -30,6 +30,9 @@ struct LibraryWorkView: View {
 	@State private var installQueue: [InstallItem] = []
 	@State private var inFlight: [InstallItem] = []
 	@State private var showingInstalls = false
+	@State private var installDetent = PresentationDetent.height(275)
+	private let collapsedInstall = PresentationDetent.height(80)
+	private let expandedInstall = PresentationDetent.height(275)
 	@AppStorage("Feather.dismissInstallAfterFinish") private var dismissAfterFinish = false
 	@AppStorage("Feather.openImportAfterInstall") private var openImportAfterInstall = false
 	@State private var loaded = false
@@ -133,21 +136,40 @@ struct LibraryWorkView: View {
 				}
 				inFlight.removeAll()
 			}) {
-				ZStack {
-					ForEach(inFlight) { item in
-						InstallPreviewView(app: item.app, onOutcome: { message in
-							finishInstall(item, message: message)
-						}, onTransferStarted: {
-							installNext(overlap: true)
-						}, protectedCopies: {
-							Set((inFlight + installQueue).compactMap { $0.app.uuid })
-						})
-						.opacity(inFlight.last?.id == item.id ? 1 : 0)
-						.accessibilityHidden(inFlight.last?.id != item.id)
-						.allowsHitTesting(inFlight.last?.id == item.id)
+				VStack(spacing: 0) {
+					Button {
+						installDetent = installDetent == collapsedInstall ? expandedInstall : collapsedInstall
+					} label: {
+						HStack {
+							Label(.localized("Install Queue"), systemImage: "tray.full")
+							Spacer()
+							Text((inFlight.count + installQueue.count).formatted())
+							Image(systemName: installDetent == collapsedInstall ? "chevron.up" : "chevron.down")
+								.accessibilityLabel(.localized(installDetent == collapsedInstall ? "Expand" : "Minimize"))
+						}
+						.padding()
 					}
+					.buttonStyle(.plain)
+					ZStack {
+						ForEach(inFlight) { item in
+							InstallPreviewView(app: item.app, onOutcome: { message in
+								finishInstall(item, message: message)
+							}, onTransferStarted: {
+								installNext(overlap: true)
+							}, protectedCopies: {
+								Set((inFlight + installQueue).compactMap { $0.app.uuid })
+							})
+							.opacity(inFlight.last?.id == item.id ? 1 : 0)
+							.accessibilityHidden(inFlight.last?.id != item.id)
+							.allowsHitTesting(inFlight.last?.id == item.id)
+						}
+					}
+					.accessibilityHidden(installDetent == collapsedInstall)
+					.allowsHitTesting(installDetent != collapsedInstall)
+					.opacity(installDetent == collapsedInstall ? 0 : 1)
 				}
-				.presentationDetents([.height(240)])
+				.presentationDetents([collapsedInstall, expandedInstall], selection: $installDetent)
+				.modifier(InstallQueueBackgroundInteraction(detent: collapsedInstall))
 			}
 		}
 		.onAppear {
@@ -327,6 +349,7 @@ struct LibraryWorkView: View {
 		installQueue.removeFirst()
 		results[next.rowID] = .localized("Installing")
 		inFlight.append(next)
+		if !showingInstalls { installDetent = expandedInstall }
 		showingInstalls = true
 	}
 
@@ -350,6 +373,18 @@ struct LibraryWorkView: View {
 			case .unavailable: .localized("This update is no longer available. Check for updates again.")
 			case .noCertificate: .localized("No Certificate")
 			}
+		}
+	}
+}
+
+private struct InstallQueueBackgroundInteraction: ViewModifier {
+	let detent: PresentationDetent
+
+	func body(content: Content) -> some View {
+		if #available(iOS 16.4, *) {
+			content.presentationBackgroundInteraction(.enabled(upThrough: detent))
+		} else {
+			content
 		}
 	}
 }

@@ -8,6 +8,7 @@
 import SwiftUI
 import UserNotifications
 import CoreData
+import CoreSpotlight
 import Nuke
 import IDeviceSwift
 import OSLog
@@ -34,12 +35,27 @@ struct FeatherApp: App {
 			.animation(.smooth, value: downloadManager.manualDownloads.description)
 			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
 				downloadManager.importPendingDownloads()
-				Task { await InstallTLSCertificates.shared.refreshIfNeeded() }
+				Task {
+					await InstallTLSCertificates.shared.refreshIfNeeded()
+					await CertificateKeychainSync.syncIfDue()
+				}
 			}
 			.onAppear {
 				if UIApplication.shared.applicationState == .active { downloadManager.importPendingDownloads() }
 			}
-			.task { await InstallTLSCertificates.shared.refreshIfNeeded() }
+			.task {
+				LibrarySpotlight.schedule()
+				await InstallTLSCertificates.shared.refreshIfNeeded()
+				await CertificateKeychainSync.syncIfDue()
+			}
+			.onContinueUserActivity(CSSearchableItemActionType) { activity in
+				if let uuid = LibrarySpotlight.appID(from: activity) {
+					FeatherAlerts.shared.open(.appInfo(uuid))
+				}
+			}
+			.onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: storage.context)) { _ in
+				Task { @MainActor in LibrarySpotlight.schedule() }
+			}
 			#if !targetEnvironment(macCatalyst)
 			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
 				Task {
@@ -81,6 +97,7 @@ struct FeatherApp: App {
 		if url.scheme == "feather" {
 			if url.host == "library" { FeatherAlerts.shared.open(.library("")); return }
 			if url.host == "certificates" { FeatherAlerts.shared.open(.certificates); return }
+			if url.host == InstallShortcut.callbackHost { InstallShortcut.handle(url); return }
 			/// feather://import-certificate?p12=<base64>&mobileprovision=<base64>&password=<base64>
 			if url.host == "import-certificate" {
 				guard

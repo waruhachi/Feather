@@ -16,17 +16,23 @@ final class ZsignHandler {
 	private var _options: Options
 	private var _certificate: CertificatePair?
 	private let profileURL: URL?
+	private let additionalProfiles: [URL]
+	private let provisionWithAppleID: Bool
 
 	init(
 		appUrl: URL,
 		options: Options = OptionsManager.shared.options,
 		cert: CertificatePair? = nil,
-		profileURL: URL? = nil
+		profileURL: URL? = nil,
+		additionalProfiles: [URL] = [],
+		provisionWithAppleID: Bool = false
 	) {
 		self._appUrl = appUrl
 		self._options = options
 		self._certificate = cert
 		self.profileURL = profileURL
+		self.additionalProfiles = additionalProfiles
+		self.provisionWithAppleID = provisionWithAppleID
 	}
 
 	func disinject() async throws {
@@ -55,11 +61,12 @@ final class ZsignHandler {
 			appPath: _appUrl.relativePath,
 			provisionPath: (profileURL ?? Storage.shared.getFile(.provision, from: cert))?.path
 				?? "",
+			additionalProvisionPaths: additionalProfiles.map(\.path),
 			p12Path: Storage.shared.getFile(.certificate, from: cert)?.path
 				?? "",
 			p12Password: cert.password ?? "",
 			entitlementsPath: _options.appEntitlementsFile?.path ?? "",
-			removeProvision: !_options.removeProvisioning,
+			removeProvision: provisionWithAppleID ? false : !_options.removeProvisioning,
 			completion: { success in
 				if !success {
 					self.hadError = SigningFileHandlerError.signFailed

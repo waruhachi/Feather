@@ -1,5 +1,6 @@
 #if !targetEnvironment(macCatalyst)
 import AppIntents
+import CoreData
 import Foundation
 import UniformTypeIdentifiers
 
@@ -47,6 +48,47 @@ struct SignIPAIntent: AppIntent {
 	}
 }
 
+struct SignLatestImportIntent: AppIntent {
+	static let title: LocalizedStringResource = "Sign Latest IPA"
+	static let openAppWhenRun = true
+
+	@MainActor
+	static func openLatest() throws -> Bool {
+		let request = Imported.fetchRequest()
+		request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
+		request.fetchLimit = 1
+		guard let uuid = try Storage.shared.context.fetch(request).first?.uuid else { return false }
+		FeatherAlerts.shared.open(.signing(uuid))
+		return true
+	}
+
+	@MainActor
+	func perform() async throws -> some IntentResult & ProvidesDialog {
+		if try Self.openLatest() {
+			return .result(dialog: "Opening your latest import for signing.")
+		}
+		return .result(dialog: "There are no imported IPAs in your Feather Library.")
+	}
+}
+
+struct CertificateDaysLeftIntent: AppIntent {
+	static let title: LocalizedStringResource = "Days Left on Feather Certificate"
+
+	@MainActor
+	func perform() async throws -> some IntentResult & ReturnsValue<Int> & ProvidesDialog {
+		let selection = UserDefaults.standard.integer(forKey: "feather.selectedCert")
+		guard let certificate = Storage.shared.getCertificate(for: selection), let expiration = certificate.expiration else {
+			return .result(value: 0, dialog: "No signing certificate is selected in Feather.")
+		}
+		guard !certificate.revoked else {
+			return .result(value: 0, dialog: "Your selected signing certificate is revoked.")
+		}
+		let days = max(0, Int(ceil(expiration.timeIntervalSinceNow / 86400)))
+		if days == 0 { return .result(value: days, dialog: "Your selected signing certificate has expired.") }
+		return .result(value: days, dialog: "Your selected signing certificate expires in \(days) days.")
+	}
+}
+
 struct FeatherAppShortcuts: AppShortcutsProvider {
 	static var appShortcuts: [AppShortcut] {
 		AppShortcut(
@@ -60,6 +102,18 @@ struct FeatherAppShortcuts: AppShortcutsProvider {
 			phrases: ["Sign an IPA with \(.applicationName)"],
 			shortTitle: "Sign IPA",
 			systemImageName: "signature"
+		)
+		AppShortcut(
+			intent: SignLatestImportIntent(),
+			phrases: ["Sign the latest import in \(.applicationName)"],
+			shortTitle: "Sign Latest IPA",
+			systemImageName: "signature"
+		)
+		AppShortcut(
+			intent: CertificateDaysLeftIntent(),
+			phrases: ["When does my \(.applicationName) certificate expire"],
+			shortTitle: "Certificate Expiry",
+			systemImageName: "checkmark.seal"
 		)
 	}
 }

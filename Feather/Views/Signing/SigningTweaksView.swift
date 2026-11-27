@@ -14,6 +14,7 @@ struct SigningTweaksView: View {
 	@State private var _libraryPresenting = false
 
 	@Binding var options: Options
+	var bundleIdentifier: String? = nil
 
 	// MARK: Body
 	var body: some View {
@@ -43,6 +44,11 @@ struct SigningTweaksView: View {
 			Button(.localized("Choose from Tweak Manager"), systemImage: "shippingbox") {
 				_libraryPresenting = true
 			}
+			if let bundleIdentifier {
+				NavigationLink(.localized("Suggested Tweaks")) {
+					TweakCatalogView(bundleIdentifier: bundleIdentifier, onSelect: addLibraryTweaks)
+				}
+			}
 
 			NBSection(.localized("Tweaks")) {
 				if !options.injectionFiles.isEmpty {
@@ -69,19 +75,7 @@ struct SigningTweaksView: View {
 		.sheet(isPresented: $_libraryPresenting) {
 			NBNavigationView(.localized("Tweak Manager"), displayMode: .inline) {
 				TweakLibraryView { files in
-					for url in files {
-						let isExtension = url.pathExtension.lowercased() == "appex"
-						FileManager.default.moveAndStore(url, with: isExtension ? "FeatherExtension" : "FeatherTweak") { copy in
-							guard FileManager.default.fileExists(atPath: copy.path) else { return }
-							if isExtension {
-								options.injectedAppExtensions.append(copy)
-							} else {
-								options.injectionFiles.append(copy)
-								if options.tweakInjectionRules == nil { options.tweakInjectionRules = [:] }
-								options.tweakInjectionRules?[copy.absoluteString] = TweakLibrary.metadata(for: url).injection
-							}
-						}
-					}
+					addLibraryTweaks(files)
 					_libraryPresenting = false
 				}
 			}
@@ -115,6 +109,22 @@ struct SigningTweaksView: View {
 
 // MARK: - Extension: View
 extension SigningTweaksView {
+	private func addLibraryTweaks(_ files: [URL]) {
+		for url in files {
+			let isExtension = url.pathExtension.lowercased() == "appex"
+			FileManager.default.moveAndStore(url, with: isExtension ? "FeatherExtension" : "FeatherTweak") { copy in
+				guard FileManager.default.fileExists(atPath: copy.path) else { return }
+				if isExtension {
+					options.injectedAppExtensions.append(copy)
+				} else {
+					options.injectionFiles.append(copy)
+					if options.tweakInjectionRules == nil { options.tweakInjectionRules = [:] }
+					options.tweakInjectionRules?[copy.absoluteString] = TweakLibrary.metadata(for: url).injection
+				}
+			}
+		}
+	}
+
 	@ViewBuilder
 	private func _file(tweak: URL) -> some View {
 		NavigationLink {

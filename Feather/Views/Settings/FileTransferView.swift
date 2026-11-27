@@ -1,3 +1,5 @@
+import CoreData
+import IDeviceSwift
 import NimbleViews
 import SwiftUI
 
@@ -6,6 +8,15 @@ struct FileTransferView: View {
 	@ObservedObject private var server = TransferServer.shared
 	@State private var files: [URL] = []
 	@State private var error: String?
+
+	@FetchRequest(sortDescriptors: [NSSortDescriptor(key: "date", ascending: false)])
+	private var signed: FetchedResults<Signed>
+	@FetchRequest(sortDescriptors: [NSSortDescriptor(key: "date", ascending: false)])
+	private var imported: FetchedResults<Imported>
+	@State private var shareMessage: String?
+	@State private var sharing = false
+	@State private var askForPassword = false
+	@State private var password = ""
 
 	var body: some View {
 		NBList(.localized("File Transfer")) {
@@ -32,6 +43,41 @@ struct FileTransferView: View {
 			} footer: {
 				Text(.localized("Use a trusted Wi-Fi network. Transfers use local HTTP and stop when Feather goes into the background."))
 			}
+			if let session = server.address {
+				Section(.localized("Share With Browser")) {
+					Menu(.localized("Share Library App"), systemImage: "square.and.arrow.up") {
+						Section(.localized("Signed")) {
+							ForEach(signed, id: \.objectID) { app in
+								Button(app.name ?? .localized("Unknown")) { shareApp(app, session: session) }
+							}
+						}
+						Section(.localized("Imported")) {
+							ForEach(imported, id: \.objectID) { app in
+								Button(app.name ?? .localized("Unknown")) { shareApp(app, session: session) }
+							}
+						}
+					}
+					.disabled(sharing || (signed.isEmpty && imported.isEmpty))
+					let tweaks = TweakLibrary.files().filter { ["deb", "dylib"].contains($0.pathExtension.lowercased()) }
+					Menu(.localized("Share Tweak"), systemImage: "shippingbox") {
+						ForEach(tweaks, id: \.self) { file in
+							Button(file.lastPathComponent) {
+								share {
+									try server.share(file, name: file.lastPathComponent, session: session)
+								}
+							}
+						}
+					}
+					.disabled(sharing || tweaks.isEmpty)
+					Button(.localized("Share Encrypted Certificate Backup"), systemImage: "lock.doc") {
+						password = ""
+						askForPassword = true
+					}
+					.disabled(sharing)
+					if sharing { ProgressView() }
+					if let shareMessage { Text(shareMessage).foregroundStyle(.secondary) }
+				}
+			}
 			Section(.localized("Inbox")) {
 				ForEach(files, id: \.self) { file in
 					Menu(String(file.path.dropFirst(TransferServer.inbox.path.count + 1))) {
@@ -51,10 +97,55 @@ struct FileTransferView: View {
 			if phase == .background { Task { await server.stop() } }
 		}
 		.onDisappear { Task { await server.stop() } }
+		.alert(.localized("Certificate Backup Password"), isPresented: $askForPassword) {
+			SecureField(.localized("Password"), text: $password)
+			Button(.localized("Share")) {
+				let password = self.password
+				self.password = ""
+				guard let session = server.address else { return }
+				share {
+					let data = try await FeatherBackup.export(password: password, components: [.certificates])
+					let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+					try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.protectionKey: FileProtectionType.complete])
+					defer { try? FileManager.default.removeItem(at: directory) }
+					let file = directory.appendingPathComponent("Feather Certificates.featherbackup")
+					try data.write(to: file, options: [.atomic, .completeFileProtection])
+					try server.share(file, name: file.lastPathComponent, session: session)
+				}
+			}
+			.disabled(password.count < 8)
+			Button(.localized("Cancel"), role: .cancel) { password = "" }
+		}
 		.alert(.localized("Error"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
 			Button(.localized("OK"), role: .cancel) { error = nil }
 		} message: {
 			Text(error ?? "")
+		}
+	}
+
+	private func shareApp(_ app: AppInfoPresentable, session: URL) {
+		share {
+			let title = app.name ?? .localized("Application")
+			let archive = ArchiveHandler(app: app, viewModel: InstallerStatusViewModel(isIdevice: false))
+			try await archive.move()
+			let file = try await archive.archive()
+			try server.share(file, name: title + ".ipa", session: session)
+		}
+	}
+
+	private func share(_ prepare: @escaping @MainActor () async throws -> Void) {
+		guard !sharing else { return }
+		sharing = true
+		shareMessage = nil
+		Task {
+			defer { sharing = false }
+			do {
+				try await prepare()
+				shareMessage = .localized("Available in the browser. Refresh its shared files list.")
+			} catch is CancellationError {
+			} catch {
+				self.error = error.localizedDescription
+			}
 		}
 	}
 

@@ -13,7 +13,7 @@ enum CertificateHealth {
 		let storage = Storage.shared
 		for certificate in storage.getAllCertificates() {
 			guard !Task.isCancelled else { return }
-			if checkRevocation, !certificate.revoked {
+			if checkRevocation {
 				await storage.refreshRevocation(for: certificate)
 			}
 			guard !certificate.isDeleted, let uuid = certificate.uuid else { continue }

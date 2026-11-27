@@ -49,6 +49,7 @@ struct SourceAppProvenance: Equatable, Codable {
 	let sourceAppVersion: String?
 	let sourceAppVersionDate: Date?
 	let sourceAppDownloadURL: URL?
+	let expectedSHA256: String?
 
 	var sourceVersionID: String {
 		[
@@ -91,6 +92,11 @@ extension SourceAppProvenance {
 		self.sourceAppVersion = appVersion
 		self.sourceAppVersionDate = appVersionDate
 		self.sourceAppDownloadURL = appDownloadURL
+		let selectedVersion = version ?? app.currentAppVersion
+		let isTopLevelAsset = appDownloadURL == (app.downloadURL ?? app.currentDownloadUrl)
+		self.expectedSHA256 = selectedVersion?.downloadURL == appDownloadURL && selectedVersion?.sha256 != nil
+			? selectedVersion?.sha256
+			: (isTopLevelAsset ? app.sha256 : nil)
 	}
 }
 

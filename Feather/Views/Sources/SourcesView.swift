@@ -20,6 +20,9 @@ struct SourcesView: View {
 	@State private var _isAddingPresenting = false
 	@State private var _addingSourceLoading = false
 	@State private var _searchText = ""
+	#if !targetEnvironment(macCatalyst)
+	@State private var automaticSourceChanges = 0
+	#endif
 	@AppStorage("Feather.favoriteSources") private var _favoriteSourceData = Data()
 	
 	private var _filteredSources: [AltSource] {
@@ -40,6 +43,16 @@ struct SourcesView: View {
 		}
 		.buttonStyle(.plain)
 		.contextMenu {
+			#if !targetEnvironment(macCatalyst)
+			if let url = source.sourceURL {
+				let enabled = PairedLibraryUpdates.enabled(forSource: url)
+				Button(.localized(enabled ? "Disable Automatic Installation" : "Enable Automatic Installation"), systemImage: "arrow.down.app") {
+					PairedLibraryUpdates.setEnabled(!enabled, forSource: url)
+					automaticSourceChanges += 1
+				}
+				.id(automaticSourceChanges)
+			}
+			#endif
 			Button(.localized(favorite ? "Remove from Favorites" : "Add to Favorites"), systemImage: favorite ? "star.slash" : "star") {
 				guard !identifier.isEmpty else { return }
 				var updated = _favorites

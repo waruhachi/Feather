@@ -25,6 +25,8 @@ struct LibraryView: View {
 	@State private var wentToBackground = false
 	@State private var pendingImportAfterInstall = false
 	@State private var _isDownloadingPresenting = false
+	@State private var _isImportBrowserPresented = false
+	@State private var _browserImport: String?
 	@State private var _linkImportError: String?
 	@State private var _alertDownloadString: String = ""  // for _isDownloadingPresenting
 	@State private var _updateCheckRotation = 0.0
@@ -288,27 +290,34 @@ struct LibraryView: View {
 			.environment(\.editMode, $_editMode)
 			.sheet(item: $_work, onDismiss: _openPendingImport) { LibraryWorkView(work: $0) }
 			.onReceive(alerts.$route) { route in
-				if case .signing(let uuid)? = route {
-					Task { @MainActor in
-						if let app = _getAllApps().first(where: { $0.uuid == uuid }) {
-							_selectedSigningAppPresenting = AnyApp(base: app)
-						}
-						alerts.clear(.signing(uuid))
-					}
-					return
-				}
-				guard case .library(let uuid)? = route else { return }
+				guard let route else { return }
 				Task { @MainActor in
-					if let app = _getAllApps().first(where: { $0.uuid == uuid }),
-						let update = updateManager.update(for: app)
-					{
-						if update.canDownload {
-							_presentWork(.updates, apps: [app])
-						} else if let url = update.webURL {
-							UIApplication.open(url)
+					switch route {
+					case .appInfo(let uuid), .signing(let uuid):
+						if let app = _signedApps.first(where: { $0.uuid == uuid }).map({ $0 as AppInfoPresentable })
+							?? _importedApps.first(where: { $0.uuid == uuid }).map({ $0 as AppInfoPresentable })
+						{
+							if case .signing = route { _selectedSigningAppPresenting = AnyApp(base: app) }
+							else { _selectedInfoAppPresenting = AnyApp(base: app) }
 						}
+					case .importFiles:
+						_isImportingPresenting = true
+					case .importLink:
+						_isDownloadingPresenting = true
+					case .library(let uuid):
+						if let app = _getAllApps().first(where: { $0.uuid == uuid }),
+							let update = updateManager.update(for: app)
+						{
+							if update.canDownload {
+								_presentWork(.updates, apps: [app])
+							} else if let url = update.webURL {
+								UIApplication.open(url)
+							}
+						}
+					case .certificates:
+						return
 					}
-					alerts.clear(.library(uuid))
+					alerts.clear(route)
 				}
 			}
 			.onReceive(NotificationCenter.default.publisher(for: .featherImportAfterInstall)) { _ in
@@ -321,6 +330,13 @@ struct LibraryView: View {
 				if openImportOnReopen && _selectedInstallAppPresenting == nil && _work == nil && _selectedSigningAppPresenting == nil {
 					_isImportingPresenting = true
 				}
+			}
+			.sheet(isPresented: $_isImportBrowserPresented, onDismiss: {
+				guard let input = _browserImport else { return }
+				_browserImport = nil
+				Task { await _importLink(input) }
+			}) {
+				LibraryImportBrowser { _browserImport = $0 }
 			}
 			.sheet(isPresented: $_isInstallationSettingsPresented) {
 				NBNavigationView(.localized("Installation"), displayMode: .inline) { InstallationView() }
@@ -345,7 +361,11 @@ struct LibraryView: View {
 					_selectedInstallAppPresenting = pending
 				}
 			}) { app in
-				SigningView(app: app.base)
+				SigningView(
+					app: app.base,
+					injectAndExport: app.injectAndExport,
+					onSigned: app.injectAndExport ? { uuid in _presentSignedPackage(uuid, archive: true) } : nil
+				)
 					.compatNavigationTransition(
 						id: app.base.uuid ?? "",
 						ns: _namespace
@@ -401,8 +421,8 @@ struct LibraryView: View {
 				Text(_linkImportError ?? "")
 			}
 			.onReceive(NotificationCenter.default.publisher(for: .featherInstallApp)) { notification in
-				guard let uuid = notification.object as? String, let signed = _signedApps.first(where: { $0.uuid == uuid }) else { return }
-				_pendingInstallApp = AnyApp(base: signed)
+				guard let uuid = notification.object as? String else { return }
+				_presentSignedPackage(uuid, archive: false)
 			}
 
 			.onReceive(
@@ -481,6 +501,9 @@ extension LibraryView {
 		Button(.localized("Import from URL"), systemImage: "globe") {
 			_isDownloadingPresenting = true
 		}
+		Button(.localized("Import Browser"), systemImage: "safari") {
+			_isImportBrowserPresented = true
+		}
 	}
 }
 
@@ -537,6 +560,19 @@ extension LibraryView {
 		_selectedAppUUIDs.removeAll()
 
 		// _editMode = .inactive
+	}
+
+	private func _presentSignedPackage(_ uuid: String, archive: Bool) {
+		let request = Signed.fetchRequest()
+		request.fetchLimit = 1
+		request.predicate = NSPredicate(format: "uuid == %@", uuid)
+		guard let signed = (try? Storage.shared.context.fetch(request))?.first else { return }
+		let item = AnyApp(base: signed, archive: archive)
+		if _selectedSigningAppPresenting == nil {
+			_selectedInstallAppPresenting = item
+		} else {
+			_pendingInstallApp = item
+		}
 	}
 
 	private func _openPendingImport() {

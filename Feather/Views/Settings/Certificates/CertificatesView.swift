@@ -201,7 +201,7 @@ extension CertificatesView {
 			}
 		}
 		Divider()
-		Button(.localized("Check Revokage"), systemImage: "person.text.rectangle") {
+		Button(.localized("Check Revocation"), systemImage: "person.text.rectangle") {
 			Storage.shared.revokagedCertificate(for: cert)
 		}
 	}

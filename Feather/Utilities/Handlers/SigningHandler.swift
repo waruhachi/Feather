@@ -28,6 +28,7 @@ final class SigningHandler: NSObject {
 	// throw an error
 	var appIcon: UIImage?
 	var appCertificate: CertificatePair?
+	var provisionWithAppleID = false
 	private var selectedProfile: Storage.SigningProfile?
 	private var provisioningProfile: Certificate? {
 		selectedProfile?.profile ?? appCertificate.flatMap { Storage.shared.getProvisionFileDecoded(for: $0) }
@@ -168,11 +169,21 @@ final class SigningHandler: NSObject {
 			try _isolateKeychainGroups(for: movedAppPath)
 		}
 
+		var additionalProfiles: [URL] = []
+		#if os(iOS) && !targetEnvironment(macCatalyst)
+		if provisionWithAppleID, let certificate = appCertificate, let bundleID = infoDictionary["CFBundleIdentifier"] as? String {
+			additionalProfiles = try await AppleIDProvisioning.shared.prepareExtensionProfiles(
+				in: movedAppPath, rootID: bundleID, certificate: certificate
+			)
+		}
+		#endif
 		let handler = ZsignHandler(
 			appUrl: movedAppPath,
 			options: _options,
 			cert: appCertificate,
-			profileURL: selectedProfile?.url
+			profileURL: selectedProfile?.url,
+			additionalProfiles: additionalProfiles,
+			provisionWithAppleID: provisionWithAppleID
 		)
 		try await handler.disinject()
 

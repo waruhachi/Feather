@@ -19,6 +19,13 @@ final class AppleIDProvisioning: ObservableObject {
 		let free: Bool
 		let server: URL
 	}
+	struct DeveloperCertificate: Identifiable {
+		let id: String
+		let name: String
+		let expires: Date
+		let isCurrent: Bool
+	}
+
 	private struct SigningIdentity: Codable {
 		let account: String
 		let teamID: String
@@ -29,6 +36,7 @@ final class AppleIDProvisioning: ObservableObject {
 	}
 	private static let sessionKey = "apple-session"
 	private static let identityKey = "apple-signing-identity"
+	private static let localIdentitiesKey = "Feather.appleID.localCertificates"
 
 	@Published private(set) var account = read(AccountSession.self, key: sessionKey)
 	@Published private(set) var teams: [Team] = []
@@ -36,6 +44,13 @@ final class AppleIDProvisioning: ObservableObject {
 
 	private let portal = DeveloperPortal.shared
 	private var awaitingCode: CheckedContinuation<TwoFactorResponse, Error>?
+
+	static func isLocalIdentity(_ certificate: CertificatePair) -> Bool {
+		guard let id = certificate.uuid else { return false }
+		return (UserDefaults.standard.stringArray(forKey: localIdentitiesKey) ?? []).contains(id)
+			|| read(SigningIdentity.self, key: identityKey)?.certificateID == id
+			|| certificate.nickname?.hasPrefix("Apple ID · ") == true
+	}
 
 	func signIn(email: String, password: String, serverAddress: String) async throws {
 		guard !working else { throw Failure.busy }
@@ -45,7 +60,7 @@ final class AppleIDProvisioning: ObservableObject {
 			server.scheme?.lowercased() == "https", server.host?.isEmpty == false,
 			server.user == nil, server.password == nil
 		else { throw Failure.invalidServer }
-		let anisette = try await fetchAnisette(server)
+		let (anisette, activeServer) = try await signInAnisette(server)
 		let authentication = try await portal.authenticate(
 			appleID: email.trimmingCharacters(in: .whitespacesAndNewlines),
 			password: password, anisetteData: anisette, xcodeVersion: "26.0 (26A242)",
@@ -56,7 +71,7 @@ final class AppleIDProvisioning: ObservableObject {
 		guard let team = available.first(where: { $0.identifier == account?.teamID })
 			?? available.first(where: { $0.type == .free }) ?? available.first
 		else { throw Failure.noTeam }
-		try save(authentication, team: team, server: server)
+		try save(authentication, team: team, server: activeServer)
 		teams = available
 	}
 
@@ -81,9 +96,7 @@ final class AppleIDProvisioning: ObservableObject {
 		working = true
 		defer { working = false }
 		let authentication = account.authentication
-		let team = Team(identifier: account.teamID, name: account.teamName, type: account.free ? .free : .individual, account: authentication.account)
-		var session = authentication.session
-		session.anisetteData = try await fetchAnisette(account.server)
+		let (team, session) = try await developerSession()
 
 		let certificates = try await portal.fetchCertificates(for: team, session: session)
 		let email = authentication.account.appleID
@@ -106,14 +119,7 @@ final class AppleIDProvisioning: ObservableObject {
 			_ = try await portal.registerDevice(name: UIDevice.current.name, identifier: udid, type: type, team: team, session: session)
 		}
 		let entries = try await portal.fetchAppIDs(for: team, session: session)
-		let appID: AppID
-		if let entry = entries.first(where: { $0.bundleIdentifier == bundleID }) {
-			appID = entry
-		} else {
-			let allowed = CharacterSet.alphanumerics.union(.whitespaces)
-			let cleaned = String(name.unicodeScalars.filter { allowed.contains($0) }).trimmingCharacters(in: .whitespaces)
-			appID = try await portal.addAppID(withName: cleaned.isEmpty ? "Feather App" : String(cleaned.prefix(50)), bundleIdentifier: bundleID, team: team, session: session)
-		}
+		let appID = try await appID(for: bundleID, name: name, entries: entries, team: team, session: session)
 		let profile = try await portal.downloadProvisioningProfile(for: appID, deviceType: type, team: team, session: session)
 
 		let storage = Storage.shared
@@ -138,8 +144,140 @@ final class AppleIDProvisioning: ObservableObject {
 		try await handler.addToDatabase()
 		guard let new = storage.getAllCertificates().first(where: { $0.uuid == handler.identifier }) else { throw Failure.noIdentity }
 		identity.certificateID = handler.identifier
+		let defaults = UserDefaults.standard
+		var issued = Set(defaults.stringArray(forKey: Self.localIdentitiesKey) ?? [])
+		issued.insert(handler.identifier)
+		defaults.set(Array(issued), forKey: Self.localIdentitiesKey)
 		try Self.write(JSONEncoder().encode(identity), key: Self.identityKey)
 		return new
+	}
+
+	func prepareExtensionProfiles(in app: URL, rootID: String, certificate: CertificatePair) async throws -> [URL] {
+		let bundles = try extensionBundles(in: app, rootID: rootID)
+		guard !bundles.isEmpty else { return [] }
+
+		guard !working else { throw Failure.busy }
+		guard let udid = deviceIdentifier(),
+			let account, let identity = Self.read(SigningIdentity.self, key: Self.identityKey),
+			let certificateID = certificate.uuid, certificateID == identity.certificateID,
+			identity.account.caseInsensitiveCompare(account.authentication.account.appleID) == .orderedSame,
+			identity.teamID == account.teamID
+		else { throw Failure.noIdentity }
+		working = true
+		defer { working = false }
+		let storage = Storage.shared
+		let properties = storage.signingProfiles(for: certificate)
+		var profiles: [URL] = []
+		let (team, session) = try await developerSession()
+		let entries = try await portal.fetchAppIDs(for: team, session: session)
+		let type: DeviceType = UIDevice.current.userInterfaceIdiom == .pad ? .iPad : .iPhone
+
+		for extensionBundle in bundles {
+			try Task.checkCancellation()
+			if let existing = properties.first(where: {
+				$0.explicitBundleIdentifier == extensionBundle.id && $0.profile.ExpirationDate > Date()
+					&& $0.profile.ProvisionedDevices?.contains(where: { $0.caseInsensitiveCompare(udid) == .orderedSame }) == true
+			}) {
+				profiles.append(existing.url)
+				continue
+			}
+			let id = try await appID(for: extensionBundle.id, name: extensionBundle.name, entries: entries, team: team, session: session)
+			let profile = try await portal.downloadProvisioningProfile(for: id, deviceType: type, team: team, session: session)
+			try storage.addSigningProfile(profile.data, to: certificate)
+			guard let saved = storage.signingProfiles(for: certificate).first(where: {
+				$0.explicitBundleIdentifier == extensionBundle.id && $0.profile.ExpirationDate > Date()
+					&& $0.profile.ProvisionedDevices?.contains(where: { $0.caseInsensitiveCompare(udid) == .orderedSame }) == true
+			}) else { throw Failure.invalidExtension(extensionBundle.name) }
+			profiles.append(saved.url)
+		}
+		return profiles
+	}
+
+	private func extensionBundles(in app: URL, rootID: String) throws -> [(id: String, name: String)] {
+		let manager = FileManager.default
+		var enumerationError: Error?
+		let files = manager.enumerator(
+			at: app, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]
+		) { _, error in
+			enumerationError = error
+			return false
+		}
+		guard let files else { throw CocoaError(.fileReadUnknown) }
+		var bundles: [(id: String, name: String)] = []
+		var seen = Set<String>()
+		for case let url as URL in files {
+			let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+			if values.isSymbolicLink == true { files.skipDescendants(); continue }
+			guard values.isDirectory == true, ["appex", "app"].contains(url.pathExtension) else { continue }
+			guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier,
+				id.hasPrefix(rootID + "."), seen.insert(id).inserted
+			else { throw Failure.invalidExtension(url.lastPathComponent) }
+			bundles.append((id, bundle.name))
+		}
+		if let enumerationError { throw enumerationError }
+		return bundles
+	}
+
+	private func appID(for bundleID: String, name: String, entries: [AppID], team: Team, session: Session) async throws -> AppID {
+		if let entry = entries.first(where: { $0.bundleIdentifier == bundleID }) { return entry }
+		let allowed = CharacterSet.alphanumerics.union(.whitespaces)
+		let cleaned = String(name.unicodeScalars.filter { allowed.contains($0) }).trimmingCharacters(in: .whitespaces)
+		let name = cleaned.isEmpty ? "Feather App" : String(cleaned.prefix(50))
+		return try await portal.addAppID(withName: name, bundleIdentifier: bundleID, team: team, session: session)
+	}
+
+	func developerCertificates() async throws -> [DeveloperCertificate] {
+		guard !working else { throw Failure.busy }
+		working = true
+		defer { working = false }
+		let (team, session) = try await developerSession()
+		let identity = Self.read(SigningIdentity.self, key: Self.identityKey)
+		return try await portal.fetchCertificates(for: team, session: session).map { cert in
+			DeveloperCertificate(
+				id: cert.serialNumberHex,
+				name: cert.name,
+				expires: cert.expiryDate,
+				isCurrent: identity?.teamID == team.identifier && identity?.serial == cert.serialNumberHex
+			)
+		}
+	}
+
+	func revokeDeveloperCertificate(_ certificate: DeveloperCertificate) async throws {
+		guard !working else { throw Failure.busy }
+		working = true
+		defer { working = false }
+		let (team, session) = try await developerSession()
+		let certificates = try await portal.fetchCertificates(for: team, session: session)
+		guard let selected = certificates.first(where: { $0.serialNumberHex == certificate.id }) else { return }
+		guard try await portal.revokeCertificate(selected, for: team, session: session) else {
+			throw Failure.revokeFailed
+		}
+
+		let identity = Self.read(SigningIdentity.self, key: Self.identityKey)
+		if identity?.teamID == team.identifier, identity?.serial == certificate.id {
+			let storage = Storage.shared
+			if let id = identity?.certificateID,
+				let stored = storage.getAllCertificates().first(where: { $0.uuid == id })
+			{
+				stored.revoked = true
+				storage.saveContext()
+				await FeatherAlerts.shared.showCertificate(
+					id: id, name: stored.nickname ?? .localized("Certificate"), expiry: nil, revoked: true
+				)
+			}
+			try Self.write(nil, key: Self.identityKey)
+		}
+	}
+
+	private func developerSession() async throws -> (Team, Session) {
+		guard let account, !account.authentication.session.isExpired else { throw Failure.signInRequired }
+		let team = Team(
+			identifier: account.teamID, name: account.teamName,
+			type: account.free ? .free : .individual, account: account.authentication.account
+		)
+		var session = account.authentication.session
+		session.anisetteData = try await fetchAnisette(account.server)
+		return (team, session)
 	}
 
 	private func save(_ authentication: AuthSession, team: Team, server: URL) throws {
@@ -156,6 +294,21 @@ final class AppleIDProvisioning: ObservableObject {
 		guard let data = try? Data(contentsOf: pairing),
 			let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else { return nil }
 		return (plist["UDID"] as? String) ?? (plist["UniqueDeviceID"] as? String)
+	}
+
+	private func signInAnisette(_ server: URL) async throws -> (AnisetteData, URL) {
+		do {
+			return (try await fetchAnisette(server), server)
+		} catch {
+			try Task.checkCancellation()
+			guard server.absoluteString == Self.defaultServer else { throw error }
+			for address in ["https://ani.sidestore.io", "https://ani.sidestore.app"] {
+				guard let fallback = URL(string: address) else { continue }
+				if let data = try? await fetchAnisette(fallback) { return (data, fallback) }
+				try Task.checkCancellation()
+			}
+			throw error
+		}
 	}
 
 	private func fetchAnisette(_ server: URL) async throws -> AnisetteData {
@@ -232,7 +385,8 @@ final class AppleIDProvisioning: ObservableObject {
 	}
 
 	private enum Failure: LocalizedError {
-		case busy, invalidServer, noTeam, signInRequired, missingDevice, noIdentity, keychain
+		case busy, invalidServer, noTeam, signInRequired, missingDevice, noIdentity, keychain, revokeFailed
+		case invalidExtension(String)
 		var errorDescription: String? {
 			switch self {
 			case .busy: .localized("Apple ID provisioning is already in progress.")
@@ -241,6 +395,8 @@ final class AppleIDProvisioning: ObservableObject {
 			case .signInRequired: .localized("Sign in again under Settings → Apple ID.")
 			case .missingDevice: .localized("Import a pairing file with a UDID or enter the device UDID under Settings → Apple ID.")
 			case .noIdentity: .localized("Feather could not store the signing identity.")
+			case .invalidExtension(let name): .localized("Could not provision the nested bundle %@ with this Apple ID.", arguments: name)
+			case .revokeFailed: .localized("Apple did not confirm certificate revocation.")
 			case .keychain: .localized("Feather could not update the Apple ID Keychain entry.")
 			}
 		}

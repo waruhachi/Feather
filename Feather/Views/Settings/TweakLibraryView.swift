@@ -13,6 +13,7 @@ enum TweakLibrary {
 		var notes = ""
 		var enabled = true
 		var injection = TweakInjectionRule()
+		var catalogURL: URL?
 	}
 
 	static func files(in root: URL = directory) -> [URL] {
@@ -36,7 +37,8 @@ enum TweakLibrary {
 		)
 	}
 
-	static func add(_ file: URL, metadata: Metadata = Metadata()) throws {
+	@discardableResult
+	static func add(_ file: URL, metadata: Metadata = Metadata()) throws -> URL {
 		guard extensions.contains(file.pathExtension.lowercased()) else { throw CocoaError(.fileReadUnsupportedScheme) }
 		let access = file.startAccessingSecurityScopedResource()
 		defer { if access { file.stopAccessingSecurityScopedResource() } }
@@ -51,6 +53,7 @@ enum TweakLibrary {
 			try? manager.removeItem(at: folder)
 			throw error
 		}
+		return destination
 	}
 
 	static func remove(_ file: URL) throws {
@@ -77,6 +80,9 @@ struct TweakLibraryView: View {
 
 	var body: some View {
 		NBList(.localized("Tweak Manager")) {
+			if onSelect == nil {
+				NavigationLink(.localized("Tweak Catalog")) { TweakCatalogView() }
+			}
 			ForEach(groups.keys.sorted(), id: \.self) { folder in
 				let members = groups[folder] ?? []
 				if folder.isEmpty {
@@ -144,7 +150,7 @@ struct TweakLibraryView: View {
 		} message: {
 			Text(error ?? "")
 		}
-		.task { files = TweakLibrary.files() }
+		.onAppear { files = TweakLibrary.files() }
 	}
 
 	@ViewBuilder private func row(_ file: URL) -> some View {

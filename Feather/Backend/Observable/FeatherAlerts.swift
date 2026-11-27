@@ -12,6 +12,9 @@ final class FeatherAlerts: NSObject, ObservableObject, UNUserNotificationCenterD
 	enum Route: Equatable {
 		case library(String)
 		case signing(String)
+		case appInfo(String)
+		case importFiles
+		case importLink
 		case certificates
 	}
 	@Published private(set) var route: Route?
@@ -48,8 +51,20 @@ final class FeatherAlerts: NSObject, ObservableObject, UNUserNotificationCenterD
 		await send(key: "expiry|\(id)|\(expiry.timeIntervalSince1970)|\(window)", title: title, body: body, info: ["certificates": true])
 	}
 
+	func clearRevocation(id: String) {
+		let identifier = notificationID("revoked|\(id)")
+		let defaults = UserDefaults.standard
+		let history = defaults.stringArray(forKey: Self.historyKey) ?? []
+		defaults.set(history.filter { $0 != identifier }, forKey: Self.historyKey)
+		UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
+	}
+
+	private func notificationID(_ key: String) -> String {
+		SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+	}
+
 	private func send(key: String, title: String, body: String, info: [AnyHashable: Any]) async {
-		let id = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+		let id = notificationID(key)
 		let defaults = UserDefaults.standard
 		let history = defaults.stringArray(forKey: Self.historyKey) ?? []
 		guard !history.contains(id), pending.insert(id).inserted else { return }

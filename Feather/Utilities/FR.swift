@@ -26,8 +26,11 @@ enum FR {
 	) {
 		Task {
 			do {
-				_ = try await importPackage(ipa, download: download, sourceProvenance: sourceProvenance, importOrigin: importOrigin)
-				await MainActor.run { completion(nil) }
+				let uuid = try await importPackage(ipa, download: download, sourceProvenance: sourceProvenance, importOrigin: importOrigin)
+				await MainActor.run {
+					completion(nil)
+					if download?.updateFromUUID == nil { ImportSigning.enqueue(uuid) }
+				}
 			} catch {
 				await MainActor.run { completion(error) }
 			}
@@ -38,9 +41,11 @@ enum FR {
 		_ ipa: URL,
 		download: Download? = nil,
 		sourceProvenance: SourceAppProvenance? = nil,
-		importOrigin: IPAImportOrigin? = nil
+		importOrigin: IPAImportOrigin? = nil,
+		expectedBundleIdentifier: String? = nil
 	) async throws -> String {
-		let handler = AppFileHandler(file: ipa, download: download, sourceProvenance: sourceProvenance, importOrigin: importOrigin)
+		let handler = AppFileHandler(file: ipa, download: download, sourceProvenance: sourceProvenance, importOrigin: importOrigin,
+			expectedBundleIdentifier: expectedBundleIdentifier)
 		if download != nil {
 			let alreadyImported = await MainActor.run {
 				let request = Imported.fetchRequest()
@@ -87,10 +92,12 @@ enum FR {
 		_ app: AppInfoPresentable,
 		using options: Options,
 		icon: UIImage? = nil,
-		certificate: CertificatePair?
+		certificate: CertificatePair?,
+		provisionWithAppleID: Bool = false
 	) async throws -> String {
 		let handler = SigningHandler(app: app, options: options)
 		handler.appCertificate = certificate
+		handler.provisionWithAppleID = provisionWithAppleID
 		handler.appIcon = icon
 		let activity = await WorkLiveActivity.begin(.signing, name: app.name ?? .localized("Unknown"))
 

@@ -28,7 +28,10 @@ struct AppleIDSettingsView: View {
 					} else {
 						LabeledContent(.localized("Developer Team"), value: account.teamName)
 					}
-					Button(.localized("Sign Out"), role: .destructive) {
+					NavigationLink(.localized("Developer Certificates")) {
+					AppleIDCertificatesView()
+				}
+				Button(.localized("Sign Out"), role: .destructive) {
 						do { try provisioning.signOut() } catch { self.error = error.localizedDescription }
 					}
 				}
@@ -60,6 +63,78 @@ struct AppleIDSettingsView: View {
 		}
 		.disabled(provisioning.working)
 		.navigationTitle(.localized("Apple ID"))
+	}
+}
+
+private struct AppleIDCertificatesView: View {
+	@ObservedObject private var provisioning = AppleIDProvisioning.shared
+	@State private var certificates: [AppleIDProvisioning.DeveloperCertificate] = []
+	@State private var selected: AppleIDProvisioning.DeveloperCertificate?
+	@State private var error: String?
+	@State private var loaded = false
+
+	var body: some View {
+		List {
+			if provisioning.working {
+				ProgressView()
+			} else if loaded && certificates.isEmpty {
+				Text(.localized("No developer certificates"))
+			}
+			if let error { Text(error).foregroundStyle(.red) }
+			ForEach(certificates) { certificate in
+				VStack(alignment: .leading) {
+					Text(certificate.name)
+					Text(certificate.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+					if certificate.expires != .distantPast {
+						Text(certificate.expires, style: .date).font(.caption)
+					}
+					if certificate.isCurrent {
+						Text(.localized("Used by Feather")).font(.caption).foregroundStyle(.secondary)
+					}
+				}
+				.swipeActions(allowsFullSwipe: false) {
+					Button(.localized("Revoke"), role: .destructive) { selected = certificate }
+						.disabled(provisioning.working)
+				}
+				.contextMenu {
+					Button(.localized("Revoke"), role: .destructive) { selected = certificate }
+						.disabled(provisioning.working)
+				}
+			}
+		}
+		.navigationTitle(.localized("Developer Certificates"))
+		.task { await refresh() }
+		.refreshable { await refresh() }
+		.confirmationDialog(.localized("Revoke Developer Certificate?"), isPresented: Binding(
+			get: { selected != nil },
+			set: { if !$0 { selected = nil } }
+		), presenting: selected) { certificate in
+			Button(.localized("Revoke"), role: .destructive) { Task { await revoke(certificate) } }
+		} message: { certificate in
+			Text(verbatim: .localized("Apps signed with %@ may stop working.", arguments: certificate.name))
+		}
+	}
+
+	private func refresh() async {
+		guard !provisioning.working else { return }
+		do {
+			certificates = try await provisioning.developerCertificates()
+			loaded = true
+			error = nil
+		} catch is CancellationError {
+		} catch {
+			self.error = error.localizedDescription
+		}
+	}
+
+	private func revoke(_ certificate: AppleIDProvisioning.DeveloperCertificate) async {
+		do {
+			try await provisioning.revokeDeveloperCertificate(certificate)
+			certificates.removeAll { $0.id == certificate.id }
+			await refresh()
+		} catch {
+			self.error = error.localizedDescription
+		}
 	}
 }
 #endif

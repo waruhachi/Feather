@@ -9,11 +9,20 @@ extension Storage {
 
 		var id: String { profile.UUID }
 
-		func matchLength(for bundleID: String) -> Int? {
+		private var bundleIdentifierPattern: String? {
 			let identifier = (profile.Entitlements?["application-identifier"]?.value as? String)
 				?? (profile.Entitlements?["com.apple.application-identifier"]?.value as? String)
 			guard let identifier, let separator = identifier.firstIndex(of: ".") else { return nil }
-			let pattern = identifier[identifier.index(after: separator)...]
+			return String(identifier[identifier.index(after: separator)...])
+		}
+
+		var explicitBundleIdentifier: String? {
+			guard let pattern = bundleIdentifierPattern, !pattern.isEmpty, !pattern.contains("*") else { return nil }
+			return pattern
+		}
+
+		func matchLength(for bundleID: String) -> Int? {
+			guard let pattern = bundleIdentifierPattern else { return nil }
 			if pattern == bundleID { return Int.max }
 			guard pattern.last == "*", bundleID.hasPrefix(pattern.dropLast()) else { return nil }
 			return pattern.count - 1

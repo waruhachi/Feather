@@ -9,6 +9,18 @@ struct FeatherWidgets: WidgetBundle {
 		FeatherDownloadWidget()
 		FeatherSummaryWidget<LibrarySummary>()
 		FeatherSummaryWidget<CertificateSummary>()
+		if #available(iOS 18.0, *) {
+			FeatherImportIPAControl()
+		}
+		if #available(iOS 18.0, *) {
+			FeatherImportLinkControl()
+		}
+		if #available(iOS 18.0, *) {
+			FeatherSignLatestControl()
+		}
+		if #available(iOS 18.0, *) {
+			FeatherCertificatesControl()
+		}
 	}
 }
 
@@ -234,5 +246,46 @@ private struct FeatherWidgetBackground: ViewModifier {
 		} else {
 			content.padding()
 		}
+	}
+}
+
+@available(iOS 18.0, *)
+@MainActor
+private func featherControl(
+	_ kind: String, action: FeatherControlAction, title: LocalizedStringResource, symbol: String
+) -> some ControlWidgetConfiguration {
+	StaticControlConfiguration(kind: kind) {
+		ControlWidgetButton(action: OpenFeatherControlIntent(action)) {
+			Label { Text(title) } icon: { Image(systemName: symbol) }
+		}
+	}
+	.displayName(title)
+}
+
+@available(iOS 18.0, *)
+private struct FeatherImportIPAControl: ControlWidget {
+	var body: some ControlWidgetConfiguration {
+		featherControl("FeatherImportIPA", action: .importIPA, title: "Import IPA", symbol: "square.and.arrow.down")
+	}
+}
+
+@available(iOS 18.0, *)
+private struct FeatherImportLinkControl: ControlWidget {
+	var body: some ControlWidgetConfiguration {
+		featherControl("FeatherImportLink", action: .importLink, title: "Import IPA from URL", symbol: "link")
+	}
+}
+
+@available(iOS 18.0, *)
+private struct FeatherSignLatestControl: ControlWidget {
+	var body: some ControlWidgetConfiguration {
+		featherControl("FeatherSignLatest", action: .signLatest, title: "Sign Latest IPA", symbol: "signature")
+	}
+}
+
+@available(iOS 18.0, *)
+private struct FeatherCertificatesControl: ControlWidget {
+	var body: some ControlWidgetConfiguration {
+		featherControl("FeatherCertificates", action: .certificates, title: "Certificates", symbol: "checkmark.seal")
 	}
 }

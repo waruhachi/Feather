@@ -90,6 +90,7 @@ extension Storage {
 struct AnyApp: Identifiable {
 	let base: AppInfoPresentable
 	var archive: Bool = false
+	var injectAndExport: Bool = false
 
 	var id: String {
 		base.uuid ?? UUID().uuidString

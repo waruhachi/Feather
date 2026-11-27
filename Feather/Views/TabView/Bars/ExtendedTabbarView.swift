@@ -75,7 +75,7 @@ struct ExtendedTabbarView: View {
 		.tabViewStyle(.sidebarAdaptable)
 		.onReceive(FeatherAlerts.shared.$route) { route in
 			switch route {
-			case .library, .signing: _selectedTab = TabEnum.library.rawValue
+			case .library, .signing, .appInfo, .importFiles, .importLink: _selectedTab = TabEnum.library.rawValue
 			case .certificates: _selectedTab = TabEnum.settings.rawValue
 			case nil: break
 			}

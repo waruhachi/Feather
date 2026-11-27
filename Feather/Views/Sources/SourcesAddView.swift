@@ -100,6 +100,10 @@ struct SourcesAddView: View {
 					Text(.localized("Supports importing from KravaSign/MapleSign and ESign."))
 				}
 				
+				Section {
+					NavigationLink(.localized("Source Tools")) { SourceToolsView() }
+				}
+
 				if !_filteredRecommendedSourcesData.isEmpty {
 					NBSection(.localized("Featured")) {
 						ForEach(_filteredRecommendedSourcesData, id: \.url) { (url, source) in

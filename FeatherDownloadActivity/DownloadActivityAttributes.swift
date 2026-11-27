@@ -83,3 +83,44 @@ struct FeatherWidgetSnapshot: Codable, Equatable {
 	}
 }
 #endif
+
+#if !targetEnvironment(macCatalyst)
+@available(iOS 18.0, *)
+enum FeatherControlAction: String, AppEnum {
+	case importIPA, importLink, signLatest, certificates
+
+	static let typeDisplayRepresentation: TypeDisplayRepresentation = "Feather Action"
+	static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+		.importIPA: "Import IPA",
+		.importLink: "Import IPA from URL",
+		.signLatest: "Sign Latest IPA",
+		.certificates: "Certificates"
+	]
+}
+
+@available(iOS 18.0, *)
+struct OpenFeatherControlIntent: AppIntent {
+	static let title: LocalizedStringResource = "Open Feather"
+	static let openAppWhenRun = true
+	static let isDiscoverable = false
+
+	@Parameter(title: "Action")
+	var action: FeatherControlAction
+
+	init() {}
+	init(_ action: FeatherControlAction) { self.action = action }
+
+	@MainActor
+	func perform() async throws -> some IntentResult {
+		#if !FEATHER_ACTIVITY_EXTENSION
+		switch action {
+		case .importIPA: FeatherAlerts.shared.open(.importFiles)
+		case .importLink: FeatherAlerts.shared.open(.importLink)
+		case .signLatest: _ = try SignLatestImportIntent.openLatest()
+		case .certificates: FeatherAlerts.shared.open(.certificates)
+		}
+		#endif
+		return .result()
+	}
+}
+#endif

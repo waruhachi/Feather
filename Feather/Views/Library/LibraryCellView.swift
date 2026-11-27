@@ -272,6 +272,9 @@ extension LibraryCellView {
 				selectedSigningAppPresenting = AnyApp(base: app)
 			}
 		}
+		Button(.localized("Inject Tweaks & Export"), systemImage: "syringe") {
+			selectedSigningAppPresenting = AnyApp(base: app, injectAndExport: true)
+		}
 	}
 
 	@ViewBuilder

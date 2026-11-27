@@ -22,7 +22,7 @@ struct TabbarView: View {
 		}
 		.onReceive(FeatherAlerts.shared.$route) { route in
 			switch route {
-			case .library, .signing: selectedTab = TabEnum.library
+			case .library, .signing, .appInfo, .importFiles, .importLink: selectedTab = TabEnum.library
 			case .certificates: selectedTab = TabEnum.settings
 			case nil: break
 			}

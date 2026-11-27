@@ -36,7 +36,9 @@ extension Storage {
 		completion(nil)
 	}
 
+	@MainActor
 	func deleteCertificate(for cert: CertificatePair) {
+		CertificateKeychainSync.forget(cert)
 		if let url = getUuidDirectory(for: cert) {
 			try? FileManager.default.removeItem(at: url)
 		}
@@ -68,20 +70,24 @@ extension Storage {
 
 	@MainActor
 	func refreshRevocation(for cert: CertificatePair) async {
-		guard !cert.revoked, let p12 = getFile(.certificate, from: cert) else { return }
+		guard let p12 = getFile(.certificate, from: cert) else { return }
 		let password = cert.password ?? ""
 		let certificateID = cert.objectID
 		let result = await Task.detached(priority: .utility) {
 			CertificateRevocation.check(p12: p12, password: password)
 		}.value
-		guard !Task.isCancelled, result == .revoked,
+		guard !Task.isCancelled, result != .unavailable,
 			let stored = (try? context.existingObject(with: certificateID)) as? CertificatePair,
-			!stored.isDeleted
+			!stored.isDeleted, stored.revoked != (result == .revoked)
 		else { return }
-		stored.revoked = true
+		stored.revoked = result == .revoked
 		saveContext()
 		if let id = stored.uuid {
-			await FeatherAlerts.shared.showCertificate(id: id, name: stored.nickname ?? .localized("Certificate"), expiry: stored.expiration, revoked: true)
+			if stored.revoked {
+				await FeatherAlerts.shared.showCertificate(id: id, name: stored.nickname ?? .localized("Certificate"), expiry: stored.expiration, revoked: true)
+			} else {
+				FeatherAlerts.shared.clearRevocation(id: id)
+			}
 		}
 	}
 

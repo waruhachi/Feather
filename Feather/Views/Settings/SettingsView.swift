@@ -64,6 +64,9 @@ struct SettingsView: View {
 					NavigationLink(destination: CertificatesView()) {
 						Label(.localized("Certificates"), systemImage: "checkmark.seal")
 					}
+					NavigationLink(destination: CertificateKeychainSyncView()) {
+						Label(.localized("iCloud Keychain"), systemImage: "icloud")
+					}
 					#if os(iOS) && !targetEnvironment(macCatalyst)
 					NavigationLink(destination: AppleIDSettingsView()) {
 						Label(.localized("Apple ID"), systemImage: "person.crop.circle")
@@ -97,6 +100,9 @@ struct SettingsView: View {
 					}
 					NavigationLink(destination: FileTransferView()) {
 						Label(.localized("File Transfer"), systemImage: "wifi")
+					}
+					NavigationLink(destination: AccretionStoreView()) {
+						Label(.localized("Accretion Store"), systemImage: "storefront")
 					}
 					NavigationLink(destination: FeatherBackupView()) {
 						Label(.localized("Backup & Restore"), systemImage: "externaldrive")
