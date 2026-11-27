@@ -63,21 +63,25 @@ extension Storage {
 
 	@MainActor
 	func revokagedCertificate(for cert: CertificatePair) {
-		guard !cert.revoked, let p12 = getFile(.certificate, from: cert) else { return }
+		Task { await refreshRevocation(for: cert) }
+	}
 
+	@MainActor
+	func refreshRevocation(for cert: CertificatePair) async {
+		guard !cert.revoked, let p12 = getFile(.certificate, from: cert) else { return }
 		let password = cert.password ?? ""
 		let certificateID = cert.objectID
-		Task {
-			let result = await Task.detached(priority: .utility) {
-				CertificateRevocation.check(p12: p12, password: password)
-			}.value
-			guard result == .revoked,
-				let stored = (try? context.existingObject(with: certificateID)) as? CertificatePair,
-				!stored.isDeleted
-			else { return }
-
-			stored.revoked = true
-			saveContext()
+		let result = await Task.detached(priority: .utility) {
+			CertificateRevocation.check(p12: p12, password: password)
+		}.value
+		guard !Task.isCancelled, result == .revoked,
+			let stored = (try? context.existingObject(with: certificateID)) as? CertificatePair,
+			!stored.isDeleted
+		else { return }
+		stored.revoked = true
+		saveContext()
+		if let id = stored.uuid {
+			await FeatherAlerts.shared.showCertificate(id: id, name: stored.nickname ?? .localized("Certificate"), expiry: stored.expiration, revoked: true)
 		}
 	}
 

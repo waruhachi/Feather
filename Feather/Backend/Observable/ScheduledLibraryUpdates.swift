@@ -22,22 +22,23 @@ enum ScheduledLibraryUpdates {
 		BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: .main) { task in
 			MainActor.assumeIsolated {
 				schedule(after: Date())
-				let check = Task { @MainActor in
+				LibraryBackgroundTask.run(task) {
 					let completed = await checkIfDue()
-					task.setTaskCompleted(success: completed && !Task.isCancelled)
+					await CertificateHealth.checkIfDue()
+					return completed
 				}
-				task.expirationHandler = { check.cancel() }
 			}
 		}
 	}
 
 	static func schedule(after now: Date = Date()) {
-		guard interval != .off else {
+		let seconds = interval == .off && UserDefaults.standard.bool(forKey: FeatherAlerts.certificatesKey) ? Interval.daily.rawValue : interval.rawValue
+		guard seconds > 0 else {
 			BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
 			return
 		}
 		let request = BGAppRefreshTaskRequest(identifier: identifier)
-		request.earliestBeginDate = now.addingTimeInterval(TimeInterval(interval.rawValue))
+		request.earliestBeginDate = now.addingTimeInterval(TimeInterval(seconds))
 		do {
 			try BGTaskScheduler.shared.submit(request)
 		} catch {
@@ -52,15 +53,32 @@ enum ScheduledLibraryUpdates {
 		if let checked = manager.lastCheckedDate, Date().timeIntervalSince(checked) < TimeInterval(interval.rawValue) {
 			return true
 		}
-		let storage = Storage.shared
 		do {
-			let signed = try storage.context.fetch(Signed.fetchRequest())
-			let imported = try storage.context.fetch(Imported.fetchRequest())
-			let apps: [AppInfoPresentable] = signed.map { $0 as AppInfoPresentable } + imported.map { $0 as AppInfoPresentable }
-			return await manager.checkForUpdates(sources: storage.getSources(), localApps: apps)
+			return try await LibraryUpdateInput.checkAll()
 		} catch {
 			Logger.misc.debug("Library update check could not read the Library: \(error.localizedDescription)")
 			return false
+		}
+	}
+}
+
+@MainActor
+enum LibraryBackgroundTask {
+	static func run(_ task: BGTask, operation: @escaping @MainActor () async -> Bool) {
+		var finished = false
+		func finish(_ success: Bool) {
+			guard !finished else { return }
+			finished = true
+			task.expirationHandler = nil
+			task.setTaskCompleted(success: success)
+		}
+		let work = Task { @MainActor in
+			let completed = await operation()
+			finish(completed && !Task.isCancelled)
+		}
+		task.expirationHandler = {
+			work.cancel()
+			Task { @MainActor in finish(false) }
 		}
 	}
 }

@@ -20,6 +20,13 @@ struct TabbarView: View {
 					.tag(tab)
 			}
 		}
+		.onReceive(FeatherAlerts.shared.$route) { route in
+			switch route {
+			case .library, .signing: selectedTab = TabEnum.library
+			case .certificates: selectedTab = TabEnum.settings
+			case nil: break
+			}
+		}
 		.onChange(of: selectedTab) { _ in FeatherHaptics.navigation() }
 	}
 }

@@ -13,6 +13,7 @@ import SwiftUI
 struct LibraryView: View {
 	private let downloadManager = DownloadManager.shared
 	@StateObject var updateManager = UpdateManager.shared
+	@ObservedObject private var alerts = FeatherAlerts.shared
 
 	@State private var _selectedInfoAppPresenting: AnyApp?
 	@State private var _selectedSigningAppPresenting: AnyApp?
@@ -286,6 +287,30 @@ struct LibraryView: View {
 			}
 			.environment(\.editMode, $_editMode)
 			.sheet(item: $_work, onDismiss: _openPendingImport) { LibraryWorkView(work: $0) }
+			.onReceive(alerts.$route) { route in
+				if case .signing(let uuid)? = route {
+					Task { @MainActor in
+						if let app = _getAllApps().first(where: { $0.uuid == uuid }) {
+							_selectedSigningAppPresenting = AnyApp(base: app)
+						}
+						alerts.clear(.signing(uuid))
+					}
+					return
+				}
+				guard case .library(let uuid)? = route else { return }
+				Task { @MainActor in
+					if let app = _getAllApps().first(where: { $0.uuid == uuid }),
+						let update = updateManager.update(for: app)
+					{
+						if update.canDownload {
+							_presentWork(.updates, apps: [app])
+						} else if let url = update.webURL {
+							UIApplication.open(url)
+						}
+					}
+					alerts.clear(.library(uuid))
+				}
+			}
 			.onReceive(NotificationCenter.default.publisher(for: .featherImportAfterInstall)) { _ in
 				pendingImportAfterInstall = true
 			}

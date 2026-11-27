@@ -222,6 +222,15 @@ extension LibraryCellView {
 			}
 
 		}
+		#if !targetEnvironment(macCatalyst)
+		if app.isSigned, app.identifier != Bundle.main.bundleIdentifier {
+			let enabled = PairedLibraryUpdates.enabled(for: app)
+			Button(.localized(enabled ? "Disable Automatic Installation" : "Enable Automatic Installation"), systemImage: "arrow.down.app") {
+				PairedLibraryUpdates.setEnabled(!enabled, for: app)
+				updateManager.objectWillChange.send()
+			}
+		}
+		#endif
 		if Storage.shared.updatesDisabled(for: app.uuid) {
 			Button(.localized("Resume Updates"), systemImage: "bell") {
 				updateManager.setUpdatesDisabled(for: app, disabled: false)

@@ -34,6 +34,7 @@ struct SettingsView: View {
 	}
 
     
+	@State private var _showCertificates = false
 	private let _githubUrl = "https://github.com/claration/Feather"
     
 	// MARK: Body
@@ -124,6 +125,14 @@ struct SettingsView: View {
 					}
 				} footer: {
 					Text(.localized("Reset the applications sources, certificates, apps, and general contents."))
+				}
+			}
+			.navigationDestination(isPresented: $_showCertificates) { CertificatesView() }
+			.onReceive(FeatherAlerts.shared.$route) { route in
+				guard route == .certificates else { return }
+				Task { @MainActor in
+					_showCertificates = true
+					FeatherAlerts.shared.clear(.certificates)
 				}
 			}
 		}

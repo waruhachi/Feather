@@ -6,6 +6,8 @@
 //
 
 import SwiftUI
+import UserNotifications
+import CoreData
 import Nuke
 import IDeviceSwift
 import OSLog
@@ -40,11 +42,21 @@ struct FeatherApp: App {
 			.task { await InstallTLSCertificates.shared.refreshIfNeeded() }
 			#if !targetEnvironment(macCatalyst)
 			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-				Task { await ScheduledLibraryUpdates.checkIfDue() }
+				Task {
+					await ScheduledLibraryUpdates.checkIfDue()
+					await PairedLibraryUpdates.run()
+					await CertificateHealth.checkIfDue()
+				}
 			}
 			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
 				ScheduledLibraryUpdates.schedule()
+				PairedLibraryUpdates.schedule()
+				WidgetSummary.refresh()
 			}
+			.onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: storage.context)) { _ in
+				Task { @MainActor in WidgetSummary.refresh() }
+			}
+			.task { WidgetSummary.refresh() }
 			#endif
 			.onReceive(NotificationCenter.default.publisher(for: .heartbeatInvalidHost)) { _ in
 				DispatchQueue.main.async {
@@ -67,6 +79,8 @@ struct FeatherApp: App {
 	
 	private func _handleURL(_ url: URL) {
 		if url.scheme == "feather" {
+			if url.host == "library" { FeatherAlerts.shared.open(.library("")); return }
+			if url.host == "certificates" { FeatherAlerts.shared.open(.certificates); return }
 			/// feather://import-certificate?p12=<base64>&mobileprovision=<base64>&password=<base64>
 			if url.host == "import-certificate" {
 				guard
@@ -174,7 +188,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 	) -> Bool {
 		#if !targetEnvironment(macCatalyst)
 		ScheduledLibraryUpdates.register()
+		PairedLibraryUpdates.register()
 		#endif
+		UNUserNotificationCenter.current().delegate = FeatherAlerts.shared
 		_createPipeline()
 		_createDocumentsDirectories()
 		ResetView.clearWorkCache()

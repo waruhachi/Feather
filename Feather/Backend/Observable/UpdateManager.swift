@@ -40,7 +40,12 @@ final class UpdateManager: ObservableObject {
 	}
 
 	@Published private(set) var updates: [String: AppUpdate] = [:] {
-		didSet { saveSnapshot() }
+		didSet {
+			saveSnapshot()
+			#if !targetEnvironment(macCatalyst)
+			Task { @MainActor in WidgetSummary.refresh() }
+			#endif
+		}
 	}
 	@Published private(set) var isChecking = false
 	@Published private(set) var lastCheckedDate: Date?
@@ -164,6 +169,7 @@ final class UpdateManager: ObservableObject {
 
 		if let foundUpdate {
 			updates[localUUID] = foundUpdate
+			await FeatherAlerts.shared.showUpdates([foundUpdate])
 		} else {
 			updates[localUUID] = nil
 		}
@@ -189,6 +195,7 @@ final class UpdateManager: ObservableObject {
 			let metadata = Storage.shared.sourceMetadata(for: uuid)
 			return metadata?.updatesDisabled != true && metadata?.skippedUpdateVersionID != update.versionID
 		}
+		await FeatherAlerts.shared.showUpdates(Array(updates.values))
 		return true
 	}
 

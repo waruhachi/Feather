@@ -73,6 +73,13 @@ struct ExtendedTabbarView: View {
 			.hidden(horizontalSizeClass == .compact)
 		}
 		.tabViewStyle(.sidebarAdaptable)
+		.onReceive(FeatherAlerts.shared.$route) { route in
+			switch route {
+			case .library, .signing: _selectedTab = TabEnum.library.rawValue
+			case .certificates: _selectedTab = TabEnum.settings.rawValue
+			case nil: break
+			}
+		}
 		.onChange(of: _selectedTab) { _ in FeatherHaptics.navigation() }
 		.tabViewCustomization($customization)
 		.sheet(isPresented: $_isAddingPresenting) {

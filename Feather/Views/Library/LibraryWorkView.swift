@@ -240,30 +240,19 @@ struct LibraryWorkView: View {
 			return
 		}
 
+		if work.purpose == .updates, !LibraryUpdateInput.acquire(row.id) {
+			throw LibraryUpdateInput.Failure.inProgress
+		}
+		defer { if work.purpose == .updates { LibraryUpdateInput.release(row.id) } }
 		let input: AppInfoPresentable
 		if work.purpose == .updates {
-			guard let update = row.update, updates.canApply(update), let url = update.downloadURL else {
-				throw WorkflowError.unavailable
-			}
-			let uuid: String = try await withCheckedThrowingContinuation { continuation in
-				_ = DownloadManager.shared.startDownload(
-					from: url,
-					id: "FeatherManualDownload_Update_\(UUID().uuidString)",
-					sourceProvenance: update.sourceProvenance,
-					importOrigin: update.sourceProvenance == nil ? .remoteURL(update.sourceURL ?? url) : nil,
-					updateFromUUID: update.localUUID,
-					onImport: { continuation.resume(with: $0) }
-				)
-			}
-			let request = Imported.fetchRequest()
-			request.predicate = NSPredicate(format: "uuid == %@", uuid)
-			guard let imported = try Storage.shared.context.fetch(request).first else { throw WorkflowError.unavailable }
+			guard let update = row.update else { throw WorkflowError.unavailable }
+			let imported = try await LibraryUpdateInput.download(update)
 			if action == .download {
 				results[row.id] = .localized("Added to Library")
 				return
 			}
-			let originalIdentifier = Storage.shared.sourceMetadata(for: row.id)?.sourceAppIdentifier ?? update.bundleIdentifier
-			guard imported.identifier == originalIdentifier else { throw WorkflowError.identifierMismatch }
+			try LibraryUpdateInput.checkIdentifier(imported, update: update)
 			input = imported
 		} else {
 			input = row.app
@@ -355,11 +344,10 @@ struct LibraryWorkView: View {
 	}
 
 	private enum WorkflowError: LocalizedError {
-		case unavailable, identifierMismatch, noCertificate
+		case unavailable, noCertificate
 		var errorDescription: String? {
 			switch self {
 			case .unavailable: .localized("This update is no longer available. Check for updates again.")
-			case .identifierMismatch: .localized("The downloaded app does not match the original bundle identifier. It was added to the Library without signing.")
 			case .noCertificate: .localized("No Certificate")
 			}
 		}

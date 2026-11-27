@@ -56,3 +56,30 @@ struct ResumeFeatherDownloadsIntent: LiveActivityIntent {
 	}
 }
 #endif
+
+#if !targetEnvironment(macCatalyst)
+import Foundation
+
+struct FeatherWidgetSnapshot: Codable, Equatable {
+	let signed: Int
+	let imported: Int
+	let updates: Int
+	let certificates: Int
+	let revoked: Int
+	let nextExpiry: Date?
+
+	static let libraryKind = "FeatherLibraryWidget"
+	static let certificateKind = "FeatherCertificateWidget"
+
+	static var sharedURL: URL? {
+		guard let group = Bundle.main.object(forInfoDictionaryKey: "FeatherWidgetAppGroup") as? String, !group.isEmpty else { return nil }
+		return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
+			.appendingPathComponent("FeatherWidgetSnapshot.json")
+	}
+
+	static func read() -> Self? {
+		guard let url = sharedURL, let data = try? Data(contentsOf: url) else { return nil }
+		return try? JSONDecoder().decode(Self.self, from: data)
+	}
+}
+#endif

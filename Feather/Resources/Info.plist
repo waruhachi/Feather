@@ -2,10 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>FeatherWidgetAppGroup</key>
+	<string>$(FEATHER_WIDGET_APP_GROUP)</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).userTask.*</string>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).libraryUpdateCheck</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).pairedLibraryInstall</string>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
@@ -143,6 +146,7 @@
 	<array>
 		<string>audio</string>
 		<string>fetch</string>
+		<string>processing</string>
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
