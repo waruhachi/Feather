@@ -111,7 +111,7 @@ enum FeatherBackup {
 	static func restore(file: URL, password: String, components: Set<Component>, restorePairing: Bool = false, expectedMigrationManifest: Data? = nil) async throws -> [String] {
 		guard !password.isEmpty else { throw BackupError.passwordLength }
 		guard !components.isEmpty else { throw BackupError.invalid }
-		let (workspace, manifest) = try await Task.detached(priority: .utility) {
+		let (workspace, manifest) = try await Task.detached(priority: .utility) { () throws -> (URL, Manifest) in
 			let access = file.startAccessingSecurityScopedResource()
 			defer { if access { file.stopAccessingSecurityScopedResource() } }
 			let data = try load(file)
@@ -122,7 +122,7 @@ enum FeatherBackup {
 				zip = try AES.GCM.open(AES.GCM.SealedBox(combined: data.dropFirst(header.count + 16)), using: key(password: password, salt: salt))
 			} catch { throw BackupError.wrongPassword }
 
-			let workspace = try workspace()
+			let workspace = try Self.workspace()
 			do {
 				let payload = workspace.appendingPathComponent("Backup.zip")
 				try zip.write(to: payload, options: [.atomic, .completeFileProtection])
