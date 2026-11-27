@@ -86,6 +86,9 @@ struct SettingsView: View {
 					NavigationLink(destination: ActivityLogView()) {
 						Label(.localized("Activity Log"), systemImage: "list.bullet.rectangle")
 					}
+					NavigationLink(destination: WorkspaceFilesView()) {
+						Label(.localized("File Manager"), systemImage: "folder")
+					}
 					NavigationLink(destination: FileTransferView()) {
 						Label(.localized("File Transfer"), systemImage: "wifi")
 					}
