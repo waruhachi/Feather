@@ -15,7 +15,7 @@
       "versions": [
         {
           "version": "2.11.0",
-          "date": "2026-11-27T06:18:42Z",
+          "date": "2026-11-27T06:19:55Z",
           "size": 20488064,
           "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.11.0/Feather.ipa",
           "localizedDescription": "Variant-aware source updates, SHA-256 verification, streamed paired installs, Apple ID extension profiles, and new backup and migration tools."
@@ -35,7 +35,7 @@
         "https://github.com/khcrysalis/Feather/blob/v1.x/Images/Store.png?raw=true"
       ],
       "version": "2.11.0",
-      "versionDate": "2026-11-27T06:18:42Z",
+      "versionDate": "2026-11-27T06:19:55Z",
       "size": 20488064,
       "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.11.0/Feather.ipa"
     }
