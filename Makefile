@@ -50,9 +50,14 @@ $(PLATFORMS): deps
 	mkdir -p _build/Payload
 	cp -R _build/Applications/*.app _build/Payload/Feather.app
 	chmod -R 0755 _build/Payload/Feather.app
-	cp deps/* _build/Payload/Feather.app/ || true
+	@resources="_build/Payload/Feather.app"; \
+	if [ "$@" = "maccatalyst" ]; then resources="$$resources/Contents/Resources"; fi; \
+	cp deps/* "$$resources/"
 	@for extension in _build/Payload/Feather.app/PlugIns/*.appex; do \
 		if [ -d "$$extension" ]; then codesign --force --sign - --timestamp=none "$$extension" || exit $$?; fi; \
+	done
+	@for framework in _build/Payload/Feather.app/Contents/Frameworks/*.framework; do \
+		if [ -d "$$framework" ]; then codesign --force --sign - --timestamp=none "$$framework" || exit $$?; fi; \
 	done
 	codesign --force --sign - --timestamp=none _build/Payload/Feather.app
 

@@ -14,6 +14,13 @@
       "tintColor": "848ef9",
       "versions": [
         {
+          "version": "2.10.0",
+          "date": "2026-11-27T02:53:05Z",
+          "size": 20176341,
+          "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.10.0/Feather.ipa",
+          "localizedDescription": "Cross-source search, Library updates and notifications, per-app signing recipes, Apple ID provisioning, paired installs, and file management."
+        },
+        {
           "version": "2.9.1",
           "date": "2026-09-15T23:40:16Z",
           "size": 12598584,
@@ -27,10 +34,10 @@
         "https://github.com/khcrysalis/Feather/blob/v1.x/Images/Sign.png?raw=true",
         "https://github.com/khcrysalis/Feather/blob/v1.x/Images/Store.png?raw=true"
       ],
-      "version": "2.9.1",
-      "versionDate": "2026-09-15T23:40:16Z",
-      "size": 12598584,
-      "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.9.1/Feather.ipa"
+      "version": "2.10.0",
+      "versionDate": "2026-11-27T02:53:05Z",
+      "size": 20176341,
+      "downloadURL": "https://github.com/waruhachi/Feather/releases/download/v2.10.0/Feather.ipa"
     }
   ],
   "news": [

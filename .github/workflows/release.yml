@@ -9,22 +9,38 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
+      - name: Check for an existing release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        id: release_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.release_check.outputs.exists != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: 'true'
 
       - name: Prepare dependencies (Xcode)
+        if: steps.release_check.outputs.exists != 'true'
         run: |
           sudo xcode-select -s /Applications/Xcode_26.3.0.app
           rustup target add --toolchain stable aarch64-apple-ios
 
       - name: Build
+        if: steps.release_check.outputs.exists != 'true'
         run: | 
           make FEATHER_BUILD_NUMBER="$GITHUB_RUN_NUMBER"
 
       - name: Get Version
+        if: steps.release_check.outputs.exists != 'true'
         id: get_version
         run: |
           unzip -p packages/Feather.ipa Payload/Feather.app/Info.plist > /tmp/Feather-Info.plist
@@ -32,7 +48,7 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Create Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.release_check.outputs.exists != 'true'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v3.0.2
         with:
           name: Feather v${{ env.VERSION }}
@@ -43,4 +59,4 @@ jobs:
           fail_on_unmatched_files: true
           draft: true
         env:
-          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
