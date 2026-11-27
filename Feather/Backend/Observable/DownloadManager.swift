@@ -156,7 +156,7 @@ class DownloadManager: NSObject, ObservableObject {
 			if !downloads.contains(where: { $0 === download }) { downloads.append(download) }
 			guard download.importTask == nil else { continue }
 			download.progress = 1
-			try? handlePachageFile(url: file, dl: download, removeAfterImport: true)
+			handlePackageFile(url: file, dl: download, removeAfterImport: true)
 		}
 		updateLiveActivity()
 	}
@@ -227,24 +227,26 @@ class DownloadManager: NSObject, ObservableObject {
 		return download
 	}
 
-	func startArchive(
-		from url: URL,
-		id: String = UUID().uuidString,
-		importOrigin: IPAImportOrigin = .localFile
-	) -> Download {
+	@MainActor
+	func importLocalArchive(from url: URL, onImport: @escaping (Result<String, Error>) -> Void) {
+		guard IPADocument.accepts(url) else {
+			onImport(.failure(CocoaError(.fileReadUnsupportedScheme)))
+			return
+		}
 		let download = Download(
-			id: id,
+			id: "FeatherManualDownload_\(UUID().uuidString)",
 			url: url,
 			onlyArchiving: true,
-			importOrigin: importOrigin
+			importOrigin: .localFile
 		)
+		download.importCompletion.append(onImport)
 		downloads.append(download)
 
 		#if !targetEnvironment(macCatalyst)
-			_updateBackgroundAudioState()
+		_updateBackgroundAudioState()
 		#endif
 
-		return download
+		handlePackageFile(url: url, dl: download)
 	}
 
 	func resumeDownload(_ download: Download) {
@@ -314,7 +316,8 @@ class DownloadManager: NSObject, ObservableObject {
 
 extension DownloadManager: URLSessionDownloadDelegate {
 
-	func handlePachageFile(url: URL, dl: Download, removeAfterImport: Bool = false) throws {
+	private func handlePackageFile(url: URL, dl: Download, removeAfterImport: Bool = false) {
+		let scoped = dl.onlyArchiving && url.startAccessingSecurityScopedResource()
 		#if !targetEnvironment(macCatalyst)
 			if #available(iOS 26.0, *), UIApplication.shared.applicationState == .active {
 				BackgroundTaskManager.shared.startTask(for: dl.id, filename: dl.fileName)
@@ -325,7 +328,6 @@ extension DownloadManager: URLSessionDownloadDelegate {
 		if dl.isPaused { dl.importControl.setPaused(true) }
 		updateLiveActivity()
 		dl.importTask = Task { @MainActor in
-			let scoped = url.startAccessingSecurityScopedResource()
 			defer {
 				if scoped { url.stopAccessingSecurityScopedResource() }
 				if removeAfterImport { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -365,7 +367,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
 			download.progress = 1
 			updateLiveActivity()
 			if UIApplication.shared.applicationState == .active {
-				try handlePachageFile(url: destination, dl: download, removeAfterImport: true)
+				handlePackageFile(url: destination, dl: download, removeAfterImport: true)
 			}
 		} catch {
 			try? FileManager.default.removeItem(at: directory)

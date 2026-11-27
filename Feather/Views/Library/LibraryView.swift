@@ -376,19 +376,12 @@ struct LibraryView: View {
 					allowedContentTypes: [.ipa, .tipa],
 					allowsMultipleSelection: true,
 					onDocumentsPicked: { urls in
-						guard !urls.isEmpty else { return }
-
 						for url in urls {
-							let id =
-								"FeatherManualDownload_\(UUID().uuidString)"
-							let dl = downloadManager.startArchive(
-								from: url,
-								id: id
-							)
-							try? downloadManager.handlePachageFile(
-								url: url,
-								dl: dl
-							)
+							downloadManager.importLocalArchive(from: url) { result in
+								if case .failure(let error) = result, !(error is CancellationError) {
+									_linkImportError = error.localizedDescription
+								}
+							}
 						}
 					}
 				)

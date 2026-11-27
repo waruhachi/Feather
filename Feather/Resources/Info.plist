@@ -23,6 +23,7 @@
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
+				<string>com.apple.itunes.ipa</string>
 				<string>thewonderofyou.Feather.ipa</string>
 			</array>
 		</dict>

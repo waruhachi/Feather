@@ -53,7 +53,11 @@ final class AppFileHandler: NSObject, @unchecked Sendable {
 
 		try _fileManager.removeFileIfNeeded(at: destinationURL)
 
-		try _fileManager.copyItem(at: _ipa, to: destinationURL)
+		if _importOrigin.kind == .localFile {
+			try IPADocument.copyForImport(from: _ipa, to: destinationURL)
+		} else {
+			try _fileManager.copyItem(at: _ipa, to: destinationURL)
+		}
 		_ipa = destinationURL
 		if let checksum = _sourceProvenance?.expectedSHA256 {
 			try IPAChecksum.verify(destinationURL, expected: checksum)

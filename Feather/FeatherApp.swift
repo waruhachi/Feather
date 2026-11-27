@@ -20,6 +20,7 @@ struct FeatherApp: App {
 	let heartbeat = HeartbeatManager.shared
 	
 	@StateObject var downloadManager = DownloadManager.shared
+	@State private var importError: String?
 	let storage = Storage.shared
 	
 	var body: some Scene {
@@ -29,8 +30,15 @@ struct FeatherApp: App {
 					.transition(.move(edge: .top).combined(with: .opacity))
 				VariedTabbarView()
 					.environment(\.managedObjectContext, storage.context)
-					.onOpenURL(perform: _handleURL)
 					.transition(.move(edge: .top).combined(with: .opacity))
+			}
+			.onOpenURL(perform: _handleURL)
+			.alert(.localized("Import Failed"), isPresented: Binding(
+				get: { importError != nil }, set: { if !$0 { importError = nil } }
+			)) {
+				Button(.localized("OK"), role: .cancel) {}
+			} message: {
+				Text(importError ?? "")
 			}
 			.animation(.smooth, value: downloadManager.manualDownloads.description)
 			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -183,16 +191,16 @@ struct FeatherApp: App {
 					]
 				)
 			}
-		} else {
-			if url.pathExtension == "ipa" || url.pathExtension == "tipa" {
-				if FileManager.default.isFileFromFileProvider(at: url) {
-					guard url.startAccessingSecurityScopedResource() else { return }
-					FR.handlePackageFile(url) { _ in }
-				} else {
-					FR.handlePackageFile(url) { _ in }
+		} else if IPADocument.accepts(url) {
+			downloadManager.importLocalArchive(from: url) { result in
+				switch result {
+				case .success:
+					FeatherAlerts.shared.open(.library(""))
+				case .failure(let error) where !(error is CancellationError):
+					importError = error.localizedDescription
+				case .failure:
+					break
 				}
-				
-				return
 			}
 		}
 	}

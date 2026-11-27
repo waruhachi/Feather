@@ -17,26 +17,6 @@ import AltSourceKit
 import IDeviceSwift
 
 enum FR {
-	static func handlePackageFile(
-		_ ipa: URL,
-		download: Download? = nil,
-		sourceProvenance: SourceAppProvenance? = nil,
-		importOrigin: IPAImportOrigin? = nil,
-		completion: @escaping (Error?) -> Void
-	) {
-		Task {
-			do {
-				let uuid = try await importPackage(ipa, download: download, sourceProvenance: sourceProvenance, importOrigin: importOrigin)
-				await MainActor.run {
-					completion(nil)
-					if download?.updateFromUUID == nil { ImportSigning.enqueue(uuid) }
-				}
-			} catch {
-				await MainActor.run { completion(error) }
-			}
-		}
-	}
-
 	static func importPackage(
 		_ ipa: URL,
 		download: Download? = nil,
