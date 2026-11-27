@@ -1,0 +1,163 @@
+diff --git a/Sources/IDeviceSwift/InstallationProxy/InstallationProxy.swift b/Sources/IDeviceSwift/InstallationProxy/InstallationProxy.swift
+index 62ad145..2975994 100644
+--- a/Sources/IDeviceSwift/InstallationProxy/InstallationProxy.swift
++++ b/Sources/IDeviceSwift/InstallationProxy/InstallationProxy.swift
+@@ -12,7 +12,6 @@ import UIKit.UIApplication
+ 
+ public class InstallationProxy: Identifiable, ObservableObject {
+ 	private let _heartbeat = HeartbeatManager.shared
+-	private let _uuid = UUID().uuidString
+ 	
+ 	typealias AfcClientHandle = OpaquePointer
+ 	typealias AfcFileHandle = OpaquePointer
+@@ -27,10 +26,10 @@ public class InstallationProxy: Identifiable, ObservableObject {
+ 	
+ 	public func install(at url: URL, suspend: Bool = false) async throws {
+ 		var afcClient: AfcClientHandle?
+-		var fileHandle: AfcFileHandle?
+ 		var installproxy: InstallationProxyClientHandle?
+ 		
+-		try await Task.detached(priority: .utility) {
++		let transfer = Task.detached(priority: .utility) {
++			try Task.checkCancellation()
+ 			guard FileManager.default.fileExists(atPath: HeartbeatManager.pairingFile()) else {
+ 				throw IDeviceSwiftError(message: "Missing Pairing")
+ 			}
+@@ -81,55 +80,21 @@ public class InstallationProxy: Identifiable, ObservableObject {
+ 				throw IDeviceSwiftError(afc_make_directory_result)
+ 			}
+ 			
+-			print("1")
+-			
+-			let remoteDir = "/\(stagingDir)/\(self._uuid).ipa"
+-			
+-			let afc_file_open_result = afc_file_open(afcClient, remoteDir, AfcWrOnly, &fileHandle)
+-			guard afc_file_open_result == nil else {
+-				throw IDeviceSwiftError(afc_file_open_result)
+-			}
+-			
+-			print("2")
+-			
+-			try await self._updateStatus(with: .sendingPayload)
+-			
+-			guard let fileHandle = fileHandle else {
+-				throw IDeviceSwiftError(message: "Missing File Handle")
+-			}
+-			
+-			let data = try Data(contentsOf: url)
+-			let totalSize = data.count
+-			let chunkSize = 64 * 1024 * 1024 // 67mb
+-			var totalBytesWritten = 0
+-			
+-			guard let rawBuffer = data.withUnsafeBytes({ $0.baseAddress })?.assumingMemoryBound(to: UInt8.self) else {
+-				throw IDeviceSwiftError(message: "Error writing to AFC")
+-			}
+-			
+-			while totalBytesWritten < totalSize {
+-				let bytesLeft = totalSize - totalBytesWritten
+-				let bytesToWrite = min(chunkSize, bytesLeft)
+-				let writePtr = rawBuffer.advanced(by: totalBytesWritten)
+-				
+-				let result = afc_file_write(fileHandle, writePtr, bytesToWrite)
+-				if result != nil {
+-					throw IDeviceSwiftError(result)
++			let remoteDir = "/\(stagingDir)/\(UUID().uuidString).ipa"
++			var installationSucceeded = false
++			defer {
++				if !installationSucceeded, let afcClient,
++					let error = afc_remove_path(afcClient, remoteDir) {
++					idevice_error_free(error)
+ 				}
+-				
+-				totalBytesWritten += bytesToWrite
+-				
+-				let progress = Double(totalBytesWritten) / Double(totalSize)
+-				try await self._updateUploadProgress(with: progress)
+-			}
+-			
+-			print(2)
+-			
+-			let afc_file_close_result = afc_file_close(fileHandle)
+-			guard afc_file_close_result == nil else {
+-				throw IDeviceSwiftError(afc_file_close_result)
+ 			}
+-			
++			guard let afcClient else { throw IDeviceSwiftError(message: "Missing AFC Client") }
++
++			try await self._updateStatus(with: .sendingPayload)
++			try self._streamIPA(at: url, to: remoteDir, client: afcClient)
++			try Task.checkCancellation()
++			try await self._updateUploadProgress(with: 1)
++
+ 			try await self._updateStatus(with: .installing)
+ 			
+ 			
+@@ -182,9 +147,67 @@ public class InstallationProxy: Identifiable, ObservableObject {
+ 				throw IDeviceSwiftError(installError)
+ 			}
+ 			
++			installationSucceeded = true
+ 			try await Task.sleep(nanoseconds: 350_000_000)
+ 			try await self._updateStatus(with: .completed(.success(())))
+-		}.value
++		}
++		try await withTaskCancellationHandler {
++			try await transfer.value
++		} onCancel: {
++			transfer.cancel()
++		}
++	}
++
++	private func _streamIPA(at url: URL, to remotePath: String, client: AfcClientHandle) throws {
++		let input = try FileHandle(forReadingFrom: url)
++		defer { try? input.close() }
++		let totalSize = try input.seekToEnd()
++		guard totalSize > 0 else { throw IDeviceSwiftError(message: "The IPA is empty") }
++		try input.seek(toOffset: 0)
++
++		var handle: AfcFileHandle?
++		if let error = afc_file_open(client, remotePath, AfcWrOnly, &handle) {
++			defer { idevice_error_free(error) }
++			throw IDeviceSwiftError(error)
++		}
++		guard let handle else { throw IDeviceSwiftError(message: "Missing AFC File Handle") }
++		var closed = false
++		defer {
++			if !closed, let error = afc_file_close(handle) { idevice_error_free(error) }
++		}
++		let chunkSize: UInt64 = 1024 * 1024
++		var written: UInt64 = 0
++		var lastReported = 0
++		while written < totalSize {
++			try Task.checkCancellation()
++			let length = Int(min(chunkSize, totalSize - written))
++			guard let block = try input.read(upToCount: length), !block.isEmpty else {
++				throw IDeviceSwiftError(message: "The IPA ended before the transfer completed")
++			}
++			try block.withUnsafeBytes { bytes in
++				guard let address = bytes.bindMemory(to: UInt8.self).baseAddress else {
++					throw IDeviceSwiftError(message: "Error writing to AFC")
++				}
++				if let error = afc_file_write(handle, address, bytes.count) {
++					defer { idevice_error_free(error) }
++					throw IDeviceSwiftError(error)
++				}
++			}
++			written += UInt64(block.count)
++			let progress = Double(written) / Double(totalSize)
++			let percent = Int(progress * 100)
++			if percent > lastReported {
++				lastReported = percent
++				Task { @MainActor in
++					self.viewModel.uploadProgress = max(self.viewModel.uploadProgress, progress)
++				}
++			}
++		}
++		closed = true
++		if let error = afc_file_close(handle) {
++			defer { idevice_error_free(error) }
++			throw IDeviceSwiftError(error)
++		}
+ 	}
+ 	
+ 	private func _updateStatus(with status: InstallerStatusViewModel.InstallerStatus) async throws {

@@ -5,7 +5,7 @@ PLATFORMS := iphoneos maccatalyst
 TMP := $(TMPDIR)/$(NAME)
 TRANSPORT_CACHE := $(TMP)/transport
 .NOTPARALLEL:
-.PHONY: all clean transport $(PLATFORMS)
+.PHONY: all clean dependencies transport $(PLATFORMS)
 
 all: $(PLATFORMS)
 
@@ -14,12 +14,15 @@ clean:
 	rm -rf packages
 	rm -rf Payload
 
+dependencies:
+	sh tools/dependency-patches/apply.sh
+
 transport:
 	python3 tools/idevice-transport/build.py --cache "$(TRANSPORT_CACHE)"
 
 iphoneos: transport
 
-$(PLATFORMS):
+$(PLATFORMS): dependencies
 	rm -rf _build
 
 	@if [ "$@" = "iphoneos" ]; then \

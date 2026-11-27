@@ -1,0 +1,131 @@
+diff --git a/src/bundle.cpp b/src/bundle.cpp
+index 9553e00..54281c4 100644
+--- a/src/bundle.cpp
++++ b/src/bundle.cpp
+@@ -344,6 +344,10 @@ static bool IsAppExtensionPath(const string& strPath)
+ 
+ bool ZBundle::SignNode(jvalue& jvNode)
+ {
++	if (m_pSignAssets) {
++		m_pSignAsset = &m_pSignAssets->front();
++	}
++
+ 	if (jvNode.has("files")) {
+ 		for (size_t i = 0; i < jvNode["files"].size(); i++) {
+ 			string strFile = jvNode["files"][i];
+@@ -443,19 +447,21 @@ bool ZBundle::SignNode(jvalue& jvNode)
+ 	// written after sealing leaves the bundle failing Apple's verifier with
+ 	// "a sealed resource is missing or invalid" (codesign --verify --strict).
+ 	if (m_pSignAssets) {
+-		auto endsWith = [](const string& str, const string& suffix) {
+-			return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
+-		};
++		m_pSignAsset = &m_pSignAssets->front();
++		const string idSuffix = "." + strBundleId;
+ 		for (auto it = m_pSignAssets->rbegin(); it != m_pSignAssets->rend(); ++it) {
++			const string& applicationId = it->m_strApplicationId;
++			if (applicationId.size() < idSuffix.size() ||
++				applicationId.compare(applicationId.size() - idSuffix.size(), idSuffix.size(), idSuffix) != 0) {
++				continue;
++			}
+ 			m_pSignAsset = &(*it);
+-			if (endsWith(m_pSignAsset->m_strApplicationId, strBundleId)) {
+-				if (!m_bRemoveProvision && !ZFile::WriteFileV(m_pSignAsset->m_strProvData, "%s/%s/embedded.mobileprovision", m_strAppFolder.c_str(), strFolder.c_str())) {
+-					ZLog::ErrorV(">>> Can't write embedded.mobileprovision!\n");
+-					return false;
+-				}
+-				bForceSign = true;
+-				break;
++			if (!m_bRemoveProvision && !ZFile::WriteFileV(m_pSignAsset->m_strProvData, "%s/embedded.mobileprovision", strBaseFolder.c_str())) {
++				ZLog::ErrorV(">>> Can't write embedded.mobileprovision!\n");
++				return false;
+ 			}
++			bForceSign = true;
++			break;
+ 		}
+ 	}
+ 
+diff --git a/swift/zsign.hpp b/swift/zsign.hpp
+index c858ddc..bf54382 100644
+--- a/swift/zsign.hpp
++++ b/swift/zsign.hpp
+@@ -25,6 +25,7 @@ bool ChangeDylibPath(NSString *filePath, NSString *oldPath, NSString *newPath);
+ int zsign(
+ 	NSString *app,
+ 	NSString *prov,
++	NSArray<NSString *> *additionalProvisions,
+ 	NSString *key,
+ 	NSString *pass,
+ 	NSString *entitlement,
+diff --git a/swift/zsign.mm b/swift/zsign.mm
+index 5f948b3..63f6995 100644
+--- a/swift/zsign.mm
++++ b/swift/zsign.mm
+@@ -195,6 +195,7 @@ bool ChangeDylibPath(NSString *filePath, NSString *oldPath, NSString *newPath) {
+ int zsign(
+ 	NSString *app,
+ 	NSString *prov,
++	NSArray<NSString *> *additionalProvisions,
+ 	NSString *key,
+ 	NSString *pass,
+ 	NSString *entitlement,
+@@ -240,17 +241,29 @@ int zsign(
+ 		return -1;
+ 	}
+ 	
+-	ZSignAsset zsa;
+-	if (!zsa.Init(strCertFile, strPKeyFile, strProvFile, strEntitleFile, strPassword, bAdhoc, bSHA256Only, false)) {
+-		return -1;
+-	}
+-	
+-	bool bEnableCache = true;
+-	string strFolder = strPath;
+-	
+-	atimer.Reset();
+ 	ZBundle bundle;
+-	bool bRet = bundle.SignFolder(&zsa, strFolder, strBundleId, strBundleVersion, strDisplayName, arrDylibFiles, arrRemoveDylibNames, bForce, bWeakInject, bEnableCache, excludeprovion);
++	bool bRet;
++	atimer.Reset();
++	if (additionalProvisions.count == 0) {
++		ZSignAsset asset;
++		if (!asset.Init(strCertFile, strPKeyFile, strProvFile, strEntitleFile, strPassword, bAdhoc, bSHA256Only, false)) {
++			return -1;
++		}
++		bRet = bundle.SignFolder(&asset, strPath, strBundleId, strBundleVersion, strDisplayName, arrDylibFiles, arrRemoveDylibNames, bForce, bWeakInject, true, excludeprovion);
++	} else {
++		list<ZSignAsset> assets;
++		assets.emplace_back();
++		if (!assets.back().Init(strCertFile, strPKeyFile, strProvFile, strEntitleFile, strPassword, bAdhoc, bSHA256Only, false)) {
++			return -1;
++		}
++		for (NSString *profile in additionalProvisions) {
++			assets.emplace_back();
++			if (!assets.back().Init(strCertFile, strPKeyFile, profile.UTF8String, "", strPassword, bAdhoc, bSHA256Only, false)) {
++				return -1;
++			}
++		}
++		bRet = bundle.SignFolder(&assets, strPath, strBundleId, strBundleVersion, strDisplayName, arrDylibFiles, arrRemoveDylibNames, bForce, bWeakInject, false, excludeprovion);
++	}
+ 	ZLog::PrintV(">>> Signing:\t%s %s\n", strPath.c_str(), (bAdhoc ? " (Ad-hoc)" : ""));
+ 	atimer.PrintResult(bRet, ">>> Signed %s!", bRet ? "OK" : "Failed");
+ 	
+diff --git a/swift/zsign.swift b/swift/zsign.swift
+index dff5c0f..e5ce85e 100644
+--- a/swift/zsign.swift
++++ b/swift/zsign.swift
+@@ -70,6 +70,7 @@ public enum Zsign {
+ 	static public func sign(
+ 		appPath: String = "",
+ 		provisionPath: String = "",
++		additionalProvisionPaths: [String] = [],
+ 		p12Path: String = "",
+ 		p12Password: String = "",
+ 		entitlementsPath: String = "",
+@@ -83,6 +84,7 @@ public enum Zsign {
+ 		if zsign(
+ 			appPath,
+ 			provisionPath,
++			additionalProvisionPaths,
+ 			p12Path,
+ 			p12Password,
+ 			entitlementsPath,
