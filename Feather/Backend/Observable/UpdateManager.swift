@@ -32,7 +32,7 @@ struct AppUpdate: Identifiable, Equatable, Codable {
 final class UpdateManager: ObservableObject {
 	static let shared = UpdateManager()
 
-	private static let snapshotKey = "Feather.libraryUpdateSnapshot"
+	private static let snapshotKey = "Feather.libraryUpdateSnapshot.v2"
 
 	private struct Snapshot: Codable {
 		let date: Date
@@ -109,7 +109,9 @@ final class UpdateManager: ObservableObject {
 					sourceURL: url,
 					localUUID: uuid,
 					identifier: current.bundleIdentifier,
-					localVersion: current.localVersion
+					localVersion: current.localVersion,
+					importedURL: nil,
+					importedName: metadata?.sourceAppName ?? current.sourceProvenance?.sourceAppName
 				),
 				candidate.versionID != metadata?.skippedUpdateVersionID
 			else { continue }
@@ -411,7 +413,9 @@ final class UpdateManager: ObservableObject {
 			sourceURL: matchingRepository?.0.sourceURL ?? preferredSource,
 			localUUID: localUUID,
 			identifier: sourceAppIdentifier,
-			localVersion: sourceAppVersion ?? localApp.version
+			localVersion: sourceAppVersion ?? localApp.version,
+			importedURL: metadata?.sourceAppDownloadURL,
+			importedName: metadata?.sourceAppName
 		)
 	}
 
@@ -420,9 +424,13 @@ final class UpdateManager: ObservableObject {
 		sourceURL: URL,
 		localUUID: String,
 		identifier: String,
-		localVersion: String?
+		localVersion: String?,
+		importedURL: URL?,
+		importedName: String?
 	) -> AppUpdate? {
-		guard let app = repository.apps.first(where: { $0.id == identifier }),
+		guard let app = SourceUpdateMatch.listing(
+			in: repository.apps, bundleID: identifier, importedURL: importedURL, importedName: importedName
+		),
 			let version = app.currentVersion, !version.isEmpty,
 			_isRemoteVersion(version, newerThan: localVersion),
 			let downloadURL = app.currentDownloadUrl,
@@ -757,12 +765,17 @@ final class UpdateManager: ObservableObject {
 			return nil
 		}
 
-		return candidates.first {
+		let candidates = candidates.filter {
 			$0.appUUID != localUUID
 				&& !$0.app.isSigned
 				&& $0.app.identifier == localIdentifier
 				&& $0.app.version == localVersion
+				&& (localApp.source == nil || $0.app.source == localApp.source)
 		}
+		if candidates.count == 1 { return candidates[0] }
+		guard let name = localApp.name else { return nil }
+		let exact = candidates.filter { $0.app.name == name }
+		return exact.count == 1 ? exact[0] : nil
 	}
 
 	private func _matchesStoredRepository(
