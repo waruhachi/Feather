@@ -21,6 +21,18 @@ struct SigningView: View {
 	@State private var _isFilePickerPresenting = false
 	@State private var _isImagePickerPresenting = false
 	@State private var _isSigning = false
+	#if os(iOS) && !targetEnvironment(macCatalyst)
+	@ObservedObject private var appleID = AppleIDProvisioning.shared
+	@State private var useAppleID = false
+	#endif
+
+	private var usesAppleID: Bool {
+		#if os(iOS) && !targetEnvironment(macCatalyst)
+		useAppleID && appleID.account != nil && _temporaryOptions.signingOption == .default
+		#else
+		false
+		#endif
+	}
 	@State private var _selectedPhoto: PhotosPickerItem? = nil
 	@State private var _rememberRecipe = false
 	@State private var _loadedSettings = false
@@ -203,7 +215,16 @@ extension SigningView {
 	@ViewBuilder
 	private func _cert() -> some View {
 		NBSection(.localized("Signing")) {
-			if let cert = _selectedCert() {
+			#if os(iOS) && !targetEnvironment(macCatalyst)
+			if appleID.account != nil && _temporaryOptions.signingOption == .default {
+				Toggle(.localized("Use Apple ID"), isOn: $useAppleID)
+				if usesAppleID {
+					Text(.localized("Feather removes app extensions from the signed copy when using an Apple ID profile."))
+						.font(.caption).foregroundStyle(.secondary)
+				}
+			}
+			#endif
+			if let cert = _selectedCert(), !usesAppleID {
 				NavigationLink {
 					CertificatesView(selectedCert: $_temporaryCertificate)
 				} label: {
@@ -211,7 +232,7 @@ extension SigningView {
 						cert: cert
 					)
 				}
-			} else {
+			} else if !usesAppleID {
 				NavigationLink(.localized("Select Certificate")) {
 					CertificatesView(selectedCert: $_temporaryCertificate)
 				}
@@ -341,7 +362,7 @@ extension SigningView {
 
 	private func _start() {
 		guard
-			_selectedCert() != nil || _temporaryOptions.signingOption != .default
+			_selectedCert() != nil || usesAppleID || _temporaryOptions.signingOption != .default
 		else {
 			UIAlertController.showAlertWithOk(
 				title: .localized("No Certificate"),
@@ -409,13 +430,21 @@ extension SigningView {
 		Task { @MainActor in
 			defer { _isSigning = false }
 			do {
-				let certificate = _selectedCert()
-				let signedUUID = try await FR.signPackage(app, using: _temporaryOptions, icon: appIcon, certificate: certificate)
+				var certificate = _selectedCert()
+				var options = _temporaryOptions
+				#if os(iOS) && !targetEnvironment(macCatalyst)
+				if usesAppleID, let identifier = SigningPreflight.bundleIdentifier(for: app, options: options) {
+					certificate = try await appleID.prepare(bundleID: identifier, name: options.appName ?? app.name ?? identifier)
+					options.injectedAppExtensions = []
+					options.removeFiles.append(contentsOf: ["PlugIns", "Extensions"])
+				}
+				#endif
+				let signedUUID = try await FR.signPackage(app, using: options, icon: appIcon, certificate: certificate)
 				if _rememberRecipe, _temporaryOptions.signingOption == .default,
 					let target = SigningPreflight.bundleIdentifier(for: app, options: _temporaryOptions)
 				{
 					do {
-						try SigningRecipe.save(for: target, options: _temporaryOptions, certificate: certificate, icon: appIcon)
+						try SigningRecipe.save(for: target, options: options, certificate: certificate, icon: appIcon)
 						if !app.isSigned, let original = app.identifier {
 							SigningRecipe.setLastTarget(target, for: original)
 						}

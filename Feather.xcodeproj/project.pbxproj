@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		FADE02000000000000000003 /* SideSign in Frameworks */ = {isa = PBXBuildFile; productRef = FADE02000000000000000002 /* SideSign */; platformFilter = ios; };
 		F34A0000000000000000000E /* DownloadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34A0000000000000000000B; };
 		F34A0000000000000000000F /* DownloadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34A0000000000000000000B; };
 		F34A00000000000000000010 /* FeatherDownloadWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34A0000000000000000000C; };
@@ -85,6 +86,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FADE02000000000000000003 /* SideSign in Frameworks */,
 				330F68FE2DBF7C8600D8C35D /* NimbleViews in Frameworks */,
 				330F68FC2DBF7C8600D8C35D /* NimbleExtensions in Frameworks */,
 				3346F5C22DC329A200C7D508 /* Zsign in Frameworks */,
@@ -170,6 +172,7 @@
 			);
 			name = Feather;
 			packageProductDependencies = (
+				FADE02000000000000000002 /* SideSign */,
 				3371F7312DA9ECDD00281AC6 /* Zip */,
 				33CF13382DB5ACFB0021D4C5 /* SWCompression */,
 				FADE01000000000000000002 /* X509 */,
@@ -225,6 +228,7 @@
 			mainGroup = 3379C1B02DA869A1004372DA;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				FADE02000000000000000001 /* XCLocalSwiftPackageReference "SideSign" */,
 				3371F5152DA91FDC00281AC6 /* XCLocalSwiftPackageReference "Zsign" */,
 				3371F6F52DA9EBA500281AC6 /* XCRemoteSwiftPackageReference "Zip" */,
 				33CF13372DB5ACFB0021D4C5 /* XCRemoteSwiftPackageReference "SWCompression" */,
@@ -596,6 +600,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		FADE02000000000000000001 /* XCLocalSwiftPackageReference "SideSign" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Dependencies/SideSign;
+		};
 		330F68FF2DC03DF400D8C35D /* XCLocalSwiftPackageReference "NimbleKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = NimbleKit;
@@ -658,6 +666,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		FADE02000000000000000002 /* SideSign */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FADE02000000000000000001 /* XCLocalSwiftPackageReference "SideSign" */;
+			productName = SideSign;
+		};
 		3305BBAB2DB8944200660D45 /* Vapor */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 3305BBAA2DB8944200660D45 /* XCRemoteSwiftPackageReference "vapor" */;

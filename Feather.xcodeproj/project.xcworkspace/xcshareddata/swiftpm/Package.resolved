@@ -1,6 +1,14 @@
 {
-  "originHash" : "d92697b2c78af89096a043cc344ec9dda33b49ce7bfe3e18a7fbfe5db84bbf3c",
+  "originHash" : "1a39bc7a8210ae009026523a36e1453387ac127626f1376179e7f480185e04ea",
   "pins" : [
+    {
+      "identity" : "anisettekit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mahee96/AnisetteKit.git",
+      "state" : {
+        "revision" : "db8b41022697b6c19be8a5f01a1ce834145a2a26"
+      }
+    },
     {
       "identity" : "async-http-client",
       "kind" : "remoteSourceControl",
@@ -35,6 +43,14 @@
       "state" : {
         "revision" : "742f624a998cba2a9e653d9b1e91ad3f3a5dff6b",
         "version" : "4.15.2"
+      }
+    },
+    {
+      "identity" : "libdeflate",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SideStore/libdeflate",
+      "state" : {
+        "revision" : "da6c7dae03b78dc71af973664575e4209786fbfe"
       }
     },
     {
@@ -96,8 +112,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-asn1.git",
       "state" : {
-        "revision" : "a54383ada6cecde007d374f58f864e29370ba5c3",
-        "version" : "1.3.2"
+        "revision" : "9f542610331815e29cc3821d3b6f488db8715517",
+        "version" : "1.6.0"
       }
     },
     {

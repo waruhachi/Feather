@@ -63,6 +63,11 @@ struct SettingsView: View {
 					NavigationLink(destination: CertificatesView()) {
 						Label(.localized("Certificates"), systemImage: "checkmark.seal")
 					}
+					#if os(iOS) && !targetEnvironment(macCatalyst)
+					NavigationLink(destination: AppleIDSettingsView()) {
+						Label(.localized("Apple ID"), systemImage: "person.crop.circle")
+					}
+					#endif
                  
 				} footer: {
 					Text(.localized("Add and manage certificates used for signing applications."))
