@@ -15,15 +15,18 @@ final class ZsignHandler {
 	private var _appUrl: URL
 	private var _options: Options
 	private var _certificate: CertificatePair?
+	private let profileURL: URL?
 
 	init(
 		appUrl: URL,
 		options: Options = OptionsManager.shared.options,
-		cert: CertificatePair? = nil
+		cert: CertificatePair? = nil,
+		profileURL: URL? = nil
 	) {
 		self._appUrl = appUrl
 		self._options = options
 		self._certificate = cert
+		self.profileURL = profileURL
 	}
 
 	func disinject() async throws {
@@ -50,7 +53,7 @@ final class ZsignHandler {
 
 		let didStartSigning = Zsign.sign(
 			appPath: _appUrl.relativePath,
-			provisionPath: Storage.shared.getFile(.provision, from: cert)?.path
+			provisionPath: (profileURL ?? Storage.shared.getFile(.provision, from: cert))?.path
 				?? "",
 			p12Path: Storage.shared.getFile(.certificate, from: cert)?.path
 				?? "",

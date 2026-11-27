@@ -11,6 +11,7 @@ import OSLog
 final class CertificateFileHandler: NSObject {
 	private let _fileManager = FileManager.default
 	private let _uuid = UUID().uuidString
+	var identifier: String { _uuid }
 	
 	private let _key: URL
 	private let _provision: URL

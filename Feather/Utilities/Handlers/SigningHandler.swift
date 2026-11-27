@@ -28,6 +28,10 @@ final class SigningHandler: NSObject {
 	// throw an error
 	var appIcon: UIImage?
 	var appCertificate: CertificatePair?
+	private var selectedProfile: Storage.SigningProfile?
+	private var provisioningProfile: Certificate? {
+		selectedProfile?.profile ?? appCertificate.flatMap { Storage.shared.getProvisionFileDecoded(for: $0) }
+	}
 
 	init(
 		app: AppInfoPresentable,
@@ -149,6 +153,13 @@ final class SigningHandler: NSObject {
 		// iOS "26" (19) needs special treatment
 		try await _locateMachosAndFixupArm64eSlice(for: movedAppPath)
 
+		if _options.signingOption == .default, let certificate = appCertificate {
+			guard let bundleID = infoDictionary["CFBundleIdentifier"] as? String,
+				let profile = Storage.shared.signingProfile(for: certificate, bundleID: bundleID)
+			else { throw SigningPreflight.noMatchingProfile }
+			selectedProfile = profile
+		}
+
 		if _options.mergeEntitlements && _options.appEntitlementsFile == nil {
 			try _mergeEntitlements(for: movedAppPath)
 		}
@@ -160,7 +171,8 @@ final class SigningHandler: NSObject {
 		let handler = ZsignHandler(
 			appUrl: movedAppPath,
 			options: _options,
-			cert: appCertificate
+			cert: appCertificate,
+			profileURL: selectedProfile?.url
 		)
 		try await handler.disinject()
 
@@ -255,8 +267,7 @@ extension SigningHandler {
 
 		guard
 			let binaryEntitlements = MachOEntitlements.read(forExecutableAt: executable),
-			let certificate = appCertificate,
-			let profile = Storage.shared.getProvisionFileDecoded(for: certificate),
+			let profile = provisioningProfile,
 			let teamID = profile.TeamIdentifier.first
 		else {
 			return
@@ -369,9 +380,7 @@ extension SigningHandler {
 
 	private func _provisioningEntitlements() -> [String: Any]? {
 		guard
-			let certificate = appCertificate,
-			let entitlements = Storage.shared.getProvisionFileDecoded(for: certificate)?
-				.Entitlements
+			let entitlements = provisioningProfile?.Entitlements
 		else {
 			return nil
 		}

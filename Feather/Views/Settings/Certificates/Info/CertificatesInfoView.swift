@@ -6,6 +6,7 @@
 //
 import CoreData
 import SwiftUI
+import UniformTypeIdentifiers
 import NimbleViews
 
 // MARK: - View
@@ -16,6 +17,9 @@ struct CertificatesInfoView: View {
 	@ObservedObject var cert: CertificatePair
 	@FetchRequest private var signedApps: FetchedResults<Signed>
 	@State private var recovery: LibraryWork?
+	@State private var profiles: [Storage.SigningProfile] = []
+	@State private var importingProfile = false
+	@State private var profileError: String?
 
 	init(cert: CertificatePair) {
 		self.cert = cert
@@ -53,6 +57,27 @@ struct CertificatesInfoView: View {
 					_miscSection(data: data)
 				}
 
+				NBSection(.localized("Provisioning Profiles"), secondary: profiles.count.description) {
+					ForEach(profiles) { item in
+						VStack(alignment: .leading) {
+							Text(item.profile.Name)
+							Text(item.profile.ExpirationDate.formatted(date: .abbreviated, time: .omitted))
+								.font(.caption).foregroundStyle(.secondary)
+						}
+						.swipeActions {
+							if !item.isOriginal {
+								Button(.localized("Delete"), role: .destructive) {
+									do {
+										try FileManager.default.removeItem(at: item.url)
+										reloadProfiles()
+									} catch { profileError = error.localizedDescription }
+								}
+							}
+						}
+					}
+					Button(.localized("Add Profile"), systemImage: "plus") { importingProfile = true }
+				}
+
 				let apps = affectedApps
 				NBSection(.localized("Affected Apps"), secondary: apps.count.description) {
 					if apps.isEmpty {
@@ -85,6 +110,32 @@ struct CertificatesInfoView: View {
 		}
 		.onAppear {
 			data = Storage.shared.getProvisionFileDecoded(for: cert)
+			reloadProfiles()
+		}
+		.fileImporter(isPresented: $importingProfile, allowedContentTypes: [.mobileProvision]) { result in
+			do {
+				let url = try result.get()
+				let access = url.startAccessingSecurityScopedResource()
+				defer { if access { url.stopAccessingSecurityScopedResource() } }
+				let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+				guard size <= 4 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+				try Storage.shared.addSigningProfile(Data(contentsOf: url), to: cert)
+				reloadProfiles()
+			} catch { profileError = error.localizedDescription }
+		}
+		.alert(.localized("Profile Error"), isPresented: Binding(
+			get: { profileError != nil }, set: { if !$0 { profileError = nil } }
+		)) {
+			Button(.localized("OK"), role: .cancel) {}
+		} message: {
+			Text(profileError ?? "")
+		}
+	}
+
+	private func reloadProfiles() {
+		profiles = Storage.shared.signingProfiles(for: cert).sorted {
+			if $0.isOriginal != $1.isOriginal { return $0.isOriginal }
+			return $0.profile.Name.localizedStandardCompare($1.profile.Name) == .orderedAscending
 		}
 	}
 }

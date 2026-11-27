@@ -38,6 +38,7 @@ enum FeatherBackup {
 			let provision: Data
 			let password: String
 			let name: String?
+			var additionalProfiles: [Data]? = nil
 		}
 	}
 
@@ -53,7 +54,8 @@ enum FeatherBackup {
 				let p12 = Storage.shared.getFile(.certificate, from: cert),
 				let profile = Storage.shared.getFile(.provision, from: cert)
 			else { return nil }
-			return try .init(certificate: load(p12), provision: load(profile), password: cert.password ?? "", name: cert.nickname)
+			let profiles = try Storage.shared.signingProfiles(for: cert).filter { !$0.isOriginal }.map { try load($0.url) }
+			return try .init(certificate: load(p12), provision: load(profile), password: cert.password ?? "", name: cert.nickname, additionalProfiles: profiles)
 		}
 		let values = Dictionary(uniqueKeysWithValues: settingKeys.compactMap { key in
 			UserDefaults.standard.object(forKey: key).map { (key, $0) }
@@ -144,25 +146,35 @@ enum FeatherBackup {
 		}
 
 		for identity in manifest.certificates {
-			let existing = Storage.shared.getAllCertificates().contains { certificate in
-				guard let p12 = Storage.shared.getFile(.certificate, from: certificate),
-					let profile = Storage.shared.getFile(.provision, from: certificate)
-				else { return false }
-				return (try? load(p12)) == identity.certificate && (try? load(profile)) == identity.provision
-			}
-			if existing { continue }
 			do {
-				let key = workspace.appendingPathComponent("Restore.p12")
-				let profile = workspace.appendingPathComponent("Restore.mobileprovision")
-				try identity.certificate.write(to: key, options: [.atomic, .completeFileProtection])
-				try identity.provision.write(to: profile, options: [.atomic, .completeFileProtection])
-				guard FR.checkPasswordForCertificate(for: key, with: identity.password, using: profile) else { throw BackupError.invalid }
-				let failure: Error? = await withCheckedContinuation { continuation in
-					FR.handleCertificateFiles(p12URL: key, provisionURL: profile, p12Password: identity.password, certificateName: identity.name ?? "") {
-						continuation.resume(returning: $0)
+				let certificate: CertificatePair
+				let storage = Storage.shared
+				if let existing = storage.getAllCertificates().first(where: { certificate in
+					guard let p12 = storage.getFile(.certificate, from: certificate),
+						let profile = storage.getFile(.provision, from: certificate)
+					else { return false }
+					return (try? load(p12)) == identity.certificate && (try? load(profile)) == identity.provision
+				}) {
+					certificate = existing
+				} else {
+					let key = workspace.appendingPathComponent("Restore.p12")
+					let profile = workspace.appendingPathComponent("Restore.mobileprovision")
+					try identity.certificate.write(to: key, options: [.atomic, .completeFileProtection])
+					try identity.provision.write(to: profile, options: [.atomic, .completeFileProtection])
+					guard FR.checkPasswordForCertificate(for: key, with: identity.password, using: profile) else { throw BackupError.invalid }
+					let handler = CertificateFileHandler(key: key, provision: profile, password: identity.password, nickname: identity.name)
+					try await handler.copy()
+					try await handler.addToDatabase()
+					guard let imported = storage.getAllCertificates().first(where: { $0.uuid == handler.identifier }) else {
+						throw BackupError.invalid
 					}
+					certificate = imported
 				}
-				if let failure { throw failure }
+				let existing = Set(storage.signingProfiles(for: certificate).compactMap { try? load($0.url) })
+				for extra in identity.additionalProfiles ?? [] where !existing.contains(extra) {
+					do { try storage.addSigningProfile(extra, to: certificate) }
+					catch { problems.append((identity.name ?? .localized("Certificate")) + " — " + error.localizedDescription) }
+				}
 			} catch { problems.append((identity.name ?? .localized("Certificate")) + " — " + error.localizedDescription) }
 		}
 

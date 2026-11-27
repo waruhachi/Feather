@@ -10,6 +10,7 @@ enum SigningPreflight: LocalizedError {
 	case savedCertificateUnavailable
 	case revokedCertificate
 	case expiredProfile
+	case noMatchingProfile
 	case newerSystemRequired(String)
 
 	var errorDescription: String? {
@@ -21,6 +22,7 @@ enum SigningPreflight: LocalizedError {
 		case .updateTeamUnknown: .localized("Feather could not verify the signing team of the copy you are updating.")
 		case .savedCertificateUnavailable: .localized("The certificate saved for this app is unavailable. Select a certificate before signing.")
 		case .revokedCertificate: .localized("The selected signing certificate has been revoked.")
+		case .noMatchingProfile: .localized("No provisioning profile matches this bundle identifier.")
 		case .expiredProfile: .localized("The selected provisioning profile has expired.")
 		case .newerSystemRequired(let version): String(format: .localized("This app requires iOS %@ or later."), version)
 		}
@@ -67,17 +69,18 @@ enum SigningPreflight: LocalizedError {
 		}
 		if certificate.revoked { throw SigningPreflight.revokedCertificate }
 		let storage = Storage.shared
-		let candidate = storage.getProvisionFileDecoded(for: certificate)
-		if let candidate, candidate.ExpirationDate <= Date() { throw SigningPreflight.expiredProfile }
+		let candidate = storage.signingProfile(for: certificate, bundleID: identifier)?.profile
+		guard let candidate else { throw SigningPreflight.noMatchingProfile }
+		if candidate.ExpirationDate <= Date() { throw SigningPreflight.expiredProfile }
 		let embedded = storage.getAppDirectory(for: previous)?.appendingPathComponent("embedded.mobileprovision")
 		let embeddedProfile = embedded.flatMap { FileManager.default.fileExists(atPath: $0.path) ? CertificateReader($0).decoded : nil }
 		let originalProfile = embeddedProfile ?? storage.getCertificate(from: previous).flatMap { storage.getProvisionFileDecoded(for: $0) }
-		guard let originalTeam = originalProfile?.TeamIdentifier.first, let candidateTeam = candidate?.TeamIdentifier.first else {
+		guard let originalTeam = originalProfile?.TeamIdentifier.first, let candidateTeam = candidate.TeamIdentifier.first else {
 			throw SigningPreflight.updateTeamUnknown
 		}
 		guard originalTeam == candidateTeam else { throw SigningPreflight.updateTeamMismatch }
 		if let originalPrefix = originalProfile?.ApplicationIdentifierPrefix?.first,
-			let candidatePrefix = candidate?.ApplicationIdentifierPrefix?.first, originalPrefix != candidatePrefix
+			let candidatePrefix = candidate.ApplicationIdentifierPrefix?.first, originalPrefix != candidatePrefix
 		{
 			throw SigningPreflight.updateTeamMismatch
 		}
